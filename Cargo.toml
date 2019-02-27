@@ -1,0 +1,31 @@
+[package]
+name = "rendy-pbr"
+version = "0.1.0"
+authors = ["Gray Olson <gray@grayolson.com>"]
+edition = "2018"
+
+[features]
+default = ["rendy"]
+metal = ["rendy/metal"]
+dx12 = ["rendy/dx12"]
+vulkan = ["rendy/vulkan"]
+empty = ["rendy/empty"]
+
+[dependencies]
+genmesh = "0.6"
+nalgebra = "0.16"
+env_logger = "0.5"
+failure = "0.1"
+lazy_static = "1.0"
+image = "0.20.1"
+log = "0.4"
+winit = "0.18"
+palette = "0.4"
+rand = "0.6"
+gfx-hal = "0.1"
+
+[dependencies.rendy]
+optional = true
+# path = "../rendy/rendy"
+git = "https://github.com/termhn/rendy"
+rev = "aa19aa400e7631b5b27883efc8f9890bd61b811f"
