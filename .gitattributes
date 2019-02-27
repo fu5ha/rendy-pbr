@@ -1,0 +1,2 @@
+assets/environment filter=lfs diff=lfs merge=lfs -text
+assets/gltf filter=lfs diff=lfs merge=lfs -text
