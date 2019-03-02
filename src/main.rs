@@ -9,46 +9,38 @@ use rendy::{
     graph::{present::PresentNode, render::*, GraphBuilder, NodeBuffer, NodeImage},
     hal::{pso::DescriptorPool, Device},
     memory::MemoryUsageValue,
-    mesh::{AsVertex, Mesh, PosNormTex, Transform},
+    mesh::{AsVertex, PosNormTangTex, Transform},
     resource::{buffer::Buffer, image::{Filter, WrapMode}, sampler::Sampler},
     shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
-    texture::{pixel::{Rgba8Srgb, Rgba8Unorm}, Texture, TextureBuilder},
 };
 
 use std::{
-    collections::{HashMap, hash_map::{Entry, DefaultHasher}},
-    hash::{Hash, Hasher},
+    collections::HashMap,
     fs::File,
-    io::Read,
     mem::size_of,
     path::Path,
     time,
 };
 
-use derivative::Derivative;
-
 use gfx_hal as hal;
-
-use genmesh::{
-    generators::{IndexedPolygon, SharedVertex},
-    Triangulate,
-};
-
-use rand::distributions::{Distribution, Uniform};
 
 use winit::{EventsLoop, WindowBuilder, Event, WindowEvent};
 
+mod asset;
+mod scene;
+mod input;
+
 #[cfg(feature = "dx12")]
-type Backend = rendy::dx12::Backend;
+pub type Backend = rendy::dx12::Backend;
 
 #[cfg(feature = "metal")]
-type Backend = rendy::metal::Backend;
+pub type Backend = rendy::metal::Backend;
 
 #[cfg(feature = "vulkan")]
-type Backend = rendy::vulkan::Backend;
+pub type Backend = rendy::vulkan::Backend;
 
 #[cfg(feature = "empty")]
-type Backend = rendy::empty::Backend;
+pub type Backend = rendy::empty::Backend;
 
 lazy_static::lazy_static! {
     static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
@@ -66,342 +58,42 @@ lazy_static::lazy_static! {
     );
 }
 
-const MAX_LIGHTS: usize = 32;
 
-#[derive(Clone, Copy)]
-#[repr(C, align(16))]
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
 struct CameraArgs {
     proj: nalgebra::Matrix4<f32>,
     view: nalgebra::Matrix4<f32>,
-    camera_pos: nalgebra::Vector3<f32>,
-    _pad: f32,
+    camera_pos: nalgebra::Point3<f32>,
 }
 
-impl From<Camera> for CameraArgs {
-    fn from(cam: Camera) -> Self {
+impl From<scene::Camera> for CameraArgs {
+    fn from(cam: scene::Camera) -> Self {
         CameraArgs {
             proj: {
                 let mut proj = cam.proj.to_homogeneous();
                 proj[(1, 1)] *= -1.0;
                 proj
             },
-            view: cam.view.inverse().to_homogeneous(),
-            camera_pos: cam.view.translation.vector,
-            _pad: 0.0,
+            view: cam.view.to_homogeneous(),
+            camera_pos: nalgebra::Point3::from(cam.view.rotation.inverse() * (cam.view.translation.vector * -1.0)),
         }   
     }
 }
 
 #[derive(Clone, Copy)]
-struct Light {
-    pos: nalgebra::Vector3<f32>,
-    _pad: f32,
-    color: [f32; 3],
-    _pad1: f32,
-    intensity: f32,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C, align(16))]
+#[repr(C)]
 struct MeshUniformArgs {
     camera: CameraArgs,
     num_lights: i32,
-    _pad: [i32; 3],
-    lights: [Light; MAX_LIGHTS]
+    lights: [scene::Light; scene::MAX_LIGHTS]
 }
 
-#[derive(Clone, Copy)]
-#[repr(C, align(16))]
-struct DepthUniformArgs {
-    camera: CameraArgs,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Camera {
-    view: nalgebra::Isometry3<f32>,
-    proj: nalgebra::Perspective3<f32>,
-}
-
-struct GltfBuffers(Vec<Vec<u8>>);
-
-impl GltfBuffers {
-    pub fn load_from_gltf<P: AsRef<Path>>(base_path: P, gltf: &gltf::Gltf) -> Self {
-        use gltf::buffer::Source;
-        let mut buffers = vec![];
-        for (index, buffer) in gltf.buffers().enumerate() {
-            let data = match buffer.source() {
-                Source::Uri(uri) => {
-                    if uri.starts_with("data:") {
-                        unimplemented!();
-                    } else {
-                        let mut file = File::open(base_path.as_ref().join(uri)).unwrap();
-                        let mut data: Vec<u8> = Vec::with_capacity(file.metadata().unwrap().len() as usize);
-                        file.read_to_end(&mut data);
-                        data
-                    }
-                },
-                Source::Bin => unimplemented!(),
-            };
-
-            assert!(data.len() >= buffer.length());
-            buffers.push(data);
-        }
-        GltfBuffers(buffers)
-    }
-    /// Obtain the contents of a loaded buffer.
-    pub fn buffer(&self, buffer: &gltf::Buffer<'_>) -> Option<&[u8]> {
-        self.0.get(buffer.index()).map(Vec::as_slice)
-    }
-
-    /// Obtain the contents of a loaded buffer view.
-    pub fn view(&self, view: &gltf::buffer::View<'_>) -> Option<&[u8]> {
-        self.buffer(&view.buffer()).map(|data| {
-            let begin = view.offset();
-            let end = begin + view.length();
-            &data[begin..end]
-        })
-    }
-
-    /// Take the loaded buffer data.
-    pub fn take(self) -> Vec<Vec<u8>> {
-        self.0
-    }
-}
-
-struct Object<B: hal::Backend> {
-    mesh: Mesh<B>,
-    material: u64,
-}
-
-impl<B: hal::Backend> Object<B> {
-    fn load_from_gltf<P: AsRef<Path>>(
-        mesh: &gltf::Mesh<'_>,
-        base_dir: P,
-        buffers: &GltfBuffers,
-        material_storage: &mut HashMap<u64, Material<B>>,
-        factory: &mut Factory<B>,
-        queue: QueueId,
-    ) -> Self {
-        if mesh.primitives().len() != 1 {
-            unimplemented!();
-        }
-
-        let primitive = mesh.primitives().next().unwrap();
-        let reader = primitive.reader(|buf_id| buffers.buffer(&buf_id));
-
-
-        let indices = reader.read_indices()
-            .unwrap()
-            .into_u32()
-            .collect::<Vec<u32>>();
-
-        let positions = reader.read_positions().unwrap();
-        let normals = reader.read_normals().unwrap();
-        let uvs = reader.read_tex_coords(0).unwrap().into_f32();
-
-        let vertices = positions
-            .zip(normals.zip(uvs))
-            .map(|(pos, (norm, uv))|
-                PosNormTex {
-                    position: pos.into(),
-                    normal: norm.into(),
-                    tex_coord: uv.into(),
-                })
-            .collect::<Vec<_>>();
-        
-        let mesh = Mesh::<Backend>::builder()
-            .with_indices(&indices[..])
-            .with_vertices(&vertices[..])
-            .build(queue, factory)
-            .unwrap();
-        
-        let material = primitive.material();
-
-        let pbr_met_rough = material.pbr_metallic_roughness();
-
-        let mut hasher = DefaultHasher::new();
-        gltf_texture_uri(pbr_met_rough.base_color_texture().unwrap().texture()).hash(&mut hasher);
-        gltf_texture_uri(pbr_met_rough.metallic_roughness_texture().unwrap().texture()).hash(&mut hasher);
-        gltf_texture_uri(material.normal_texture().unwrap().texture()).hash(&mut hasher);
-        gltf_texture_uri(material.occlusion_texture().unwrap().texture()).hash(&mut hasher);
-
-        let hash = hasher.finish();
-
-        if let Entry::Vacant(e) = material_storage.entry(hash) {
-            let mut factors = Factors {
-                albedo: pbr_met_rough.base_color_factor(),
-                metallic: pbr_met_rough.metallic_factor(),
-                roughness: pbr_met_rough.roughness_factor(),
-            };
-
-            let albedo = load_gltf_texture(
-                factory,
-                queue,
-                &base_dir,
-                pbr_met_rough.base_color_texture().unwrap().texture()
-            );
-
-            let metallic_roughness = load_gltf_texture(
-                factory,
-                queue,
-                &base_dir,
-                pbr_met_rough.metallic_roughness_texture().unwrap().texture()
-            );
-
-            let normal = load_gltf_texture(
-                factory,
-                queue,
-                &base_dir,
-                material.normal_texture().unwrap().texture()
-            );
-
-            let ao = load_gltf_texture(
-                factory,
-                queue,
-                &base_dir,
-                material.occlusion_texture().unwrap().texture()
-            );
-
-            e.insert(Material{
-                factors,
-                albedo,
-                metallic_roughness,
-                normal,
-                ao,
-                hash,
-            });
-        }
-
-        Object {
-            mesh,
-            material: hash,
-        }
-    }
-}
-
-fn gltf_texture_uri(texture: gltf::Texture<'_>) -> String {
-    if let gltf::image::Source::Uri {uri, mime_type} = texture.source().source() {
-        String::from(uri)
-    } else {
-        unimplemented!();
-    }
-}
-
-fn load_gltf_texture<B, P>(factory: &mut Factory<B>, queue: QueueId, base_dir: P, texture: gltf::Texture<'_>)
-    -> Texture<B>
-    where B: hal::Backend,
-        P: AsRef<Path>
-{
-    match texture.source().source() {
-        gltf::image::Source::View {view, mime_type} => unimplemented!(),
-        gltf::image::Source::Uri {uri, mime_type} => {
-            load_texture_from_file(factory, queue, base_dir.as_ref().join(uri), true)
-        }
-    }
-}
-
-fn load_texture_from_file<P, B>(factory: &mut Factory<B>, queue: QueueId, path: P, srgb: bool)
-    -> Texture<B>
-    where B: hal::Backend,
-        P: AsRef<Path>,
-{
-    let mut file = File::open(path).unwrap();
-    let mut tex_bytes: Vec<u8> = Vec::with_capacity(file.metadata().unwrap().len() as usize);
-    file.read_to_end(&mut tex_bytes);
-
-    let tex_img = image::load_from_memory(&tex_bytes[..])
-        .unwrap()
-        .to_rgba();
-
-    let (w, h) = tex_img.dimensions();
-
-
-    if srgb {
-        let tex_img_data = tex_img
-            .pixels()
-            .map(|p| Rgba8Srgb { repr: p.data })
-            .collect::<Vec<_>>();
-
-        TextureBuilder::new()
-            .with_kind(hal::image::Kind::D2(w, h, 1, 1))
-            .with_view_kind(hal::image::ViewKind::D2)
-            .with_data_width(w)
-            .with_data_height(h)
-            .with_data(&tex_img_data)
-            .build(
-                queue,
-                hal::image::Access::SHADER_READ,
-                hal::image::Layout::ShaderReadOnlyOptimal,
-                factory,
-            )
-            .unwrap()
-    } else {
-        let tex_img_data = tex_img
-            .pixels()
-            .map(|p| Rgba8Unorm { repr: p.data })
-            .collect::<Vec<_>>();
-
-        TextureBuilder::new()
-            .with_kind(hal::image::Kind::D2(w, h, 1, 1))
-            .with_view_kind(hal::image::ViewKind::D2)
-            .with_data_width(w)
-            .with_data_height(h)
-            .with_data(&tex_img_data)
-            .build(
-                queue,
-                hal::image::Access::SHADER_READ,
-                hal::image::Layout::ShaderReadOnlyOptimal,
-                factory,
-            )
-            .unwrap()
-    }
-}
-
-#[derive(Clone, Copy, Default)]
-#[repr(C, align(16))]
-struct Factors {
-    albedo: [f32; 4],
-    metallic: f32,
-    roughness: f32,
-}
-
-#[derive(Derivative)]
-#[derivative(Eq, PartialEq)]
-struct Material<B: hal::Backend> {
-    #[derivative(PartialEq="ignore")]
-    factors: Factors,
-    #[derivative(PartialEq="ignore")]
-    albedo: Texture<B>,
-    #[derivative(PartialEq="ignore")]
-    normal: Texture<B>,
-    #[derivative(PartialEq="ignore")]
-    metallic_roughness: Texture<B>,
-    #[derivative(PartialEq="ignore")]
-    ao: Texture<B>,
-    hash: u64,
-}
-
-struct Environment<B: hal::Backend> {
-    mesh: Mesh<B>,
-    hdr: Texture<B>,
-    irradiance: Texture<B>,
-    spec_filtered: Texture<B>,
-    bdrf: Texture<B>,
-}
-
-struct Scene<B: hal::Backend> {
-    camera: Camera,
-    objects: Vec<(Object<B>, Vec<nalgebra::Matrix4<f32>>)>,
-    max_obj_instances: Vec<usize>,
-    lights: Vec<Light>,
-    // environment: Environment<B>,
-}
-
-struct Aux<B: hal::Backend> {
-    frames: usize,
-    align: u64,
-    scene: Scene<B>,
-    material_storage: HashMap<u64, Material<B>>,
+pub struct Aux<B: hal::Backend> {
+    pub frames: usize,
+    pub align: u64,
+    pub scene: scene::Scene<B>,
+    pub material_storage: HashMap<u64, asset::Material<B>>,
 }
 
 #[derive(Debug, Default)]
@@ -550,7 +242,7 @@ where
         hal::pso::InstanceRate,
     )> {
         vec![
-            PosNormTex::VERTEX.gfx_vertex_input_desc(0),
+            PosNormTangTex::VERTEX.gfx_vertex_input_desc(0),
             Transform::VERTEX.gfx_vertex_input_desc(1),
         ]
     }
@@ -589,7 +281,7 @@ where
     fn build<'a>(
         self,
         factory: &mut Factory<B>,
-        queue: QueueId,
+        _queue: QueueId,
         aux: &mut Aux<B>,
         buffers: Vec<NodeBuffer<'a, B>>,
         images: Vec<NodeImage<'a, B>>,
@@ -739,24 +431,24 @@ where
         index: usize,
         aux: &Aux<B>,
     ) -> PrepareResult {
-        debug_assert!(aux.scene.lights.len() <= MAX_LIGHTS);
-        if (self.settings != aux.into()) {
+        debug_assert!(aux.scene.lights.len() <= scene::MAX_LIGHTS);
+        if self.settings != aux.into() {
             unimplemented!();
         }
 
-        let mut lights: [Light; MAX_LIGHTS] = [aux.scene.lights[0]; MAX_LIGHTS];
+        let mut lights = [aux.scene.lights[0]; scene::MAX_LIGHTS];
         for (i, l) in aux.scene.lights.iter().enumerate() {
             lights[i] = *l;
         }
+        let camera_args: CameraArgs = aux.scene.camera.into();
         unsafe {
             factory
                 .upload_visible_buffer(
                     &mut self.buffer,
                     self.settings.uniform_offset(index as u64),
                     &[MeshUniformArgs {
-                        camera: aux.scene.camera.into(),
+                        camera: camera_args,
                         num_lights: aux.scene.lights.len() as i32,
-                        _pad: [0; 3],
                         lights,
                     }],
                 )
@@ -788,7 +480,7 @@ where
         let transforms_offset = self.settings.transforms_offset(index as u64);
         aux.scene.objects.iter()
             .enumerate()
-            .for_each(|(i, (obj, instances))| {
+            .for_each(|(i, (_obj, instances))| {
                 unsafe {
                     factory
                         .upload_visible_buffer(
@@ -827,9 +519,9 @@ where
             );
             aux.scene.objects.iter().enumerate()
                 .filter(|(_, (o, _))| o.material == *mat_hash)
-                .for_each(|(i, (obj, instances))|{
+                .for_each(|(i, (obj, _instances))|{
                     assert!(obj.mesh
-                        .bind(&[PosNormTex::VERTEX], &mut encoder)
+                        .bind(&[PosNormTangTex::VERTEX], &mut encoder)
                         .is_ok());
                     encoder.bind_vertex_buffers(
                         1,
@@ -880,7 +572,7 @@ fn main() {
     let mut event_loop = EventsLoop::new();
 
     let window = WindowBuilder::new()
-        .with_title("Rendy example")
+        .with_title("rendy-pbr")
         .build(&event_loop)
         .unwrap();
 
@@ -928,48 +620,67 @@ fn main() {
 
     let mut material_storage = HashMap::new();
 
-    let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/gltf/helmet/");
-    let file = File::open(base_path.join("SciFiHelmet.gltf")).unwrap();
-    let reader = std::io::BufReader::new(file);
-    let gltf = gltf::Gltf::from_reader(reader).unwrap();
+    let mut helmet: Option<scene::Object<Backend>> = None;
+    {
+        let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/gltf/helmet/");
+        let file = File::open(base_path.join("SciFiHelmet.gltf")).unwrap();
+        let reader = std::io::BufReader::new(file);
+        let gltf = gltf::Gltf::from_reader(reader).unwrap();
 
-    let gltf_buffers = GltfBuffers::load_from_gltf(&base_path, &gltf);
+        let gltf_buffers = asset::GltfBuffers::load_from_gltf(&base_path, &gltf);
 
-    let scene = gltf.scenes().next().unwrap();
-
-    let mut camera: Option<Camera> = None;
-
-    let mut helmet: Option<Object<Backend>> = None;
+        let scene = gltf.scenes().next().unwrap();
 
 
-    for node in scene.nodes() {
-        match node.name() {
-            Some("Camera") => {
-                if let gltf::scene::Transform::Decomposed { translation, rotation, scale } = node.transform() {
-                    camera = Some(Camera {
-                        proj: nalgebra::Perspective3::new(aspect, 3.1415 / 4.0, 1.0, 200.0),
-                        view: nalgebra::Isometry3::from_parts(
-                            nalgebra::Translation3::new(translation[0], translation[1], translation[2]),
-                            nalgebra::UnitQuaternion::from_quaternion(
-                                nalgebra::Quaternion::new(rotation[0], rotation[1], rotation[2], rotation[3])
-                            )
-                        ),
-                    })
-                }
-            },
-            Some("SciFiHelmet") => {
-                if let Some(mesh) = node.mesh() {
-                    helmet = Some(Object::load_from_gltf(
-                        &mesh,
-                        &base_path,
-                        &gltf_buffers,
-                        &mut material_storage,
-                        &mut factory,
-                        queue
-                    ));
-                }
-            },
-            _ => (),
+        for node in scene.nodes() {
+            match node.name() {
+                Some("SciFiHelmet") => {
+                    if let Some(mesh) = node.mesh() {
+                        helmet = Some(asset::object_from_gltf(
+                            &mesh,
+                            &base_path,
+                            &gltf_buffers,
+                            &mut material_storage,
+                            &mut factory,
+                            queue
+                        ));
+                    }
+                },
+                _ => (),
+            }
+        }
+    }
+
+    let camera = scene::Camera {
+        yaw: 0.0,
+        pitch: 0.0,
+        dist: 10.0,
+        focus: nalgebra::Point3::new(0.0, 0.0, 0.0),
+        proj: nalgebra::Perspective3::new(aspect, 3.1415 / 4.0, 1.0, 200.0),
+        view: nalgebra::Isometry3::from_parts(
+            nalgebra::Translation3::new(0.0, 0.0, -10.0),
+            nalgebra::UnitQuaternion::identity(),
+        ),
+    };
+
+    let instances_per_dim = 3usize;
+    let x_size = 3.0;
+    let y_size = 4.0;
+    let z_size = 4.0;
+    let mut instances = Vec::with_capacity(instances_per_dim.pow(3));
+    for x in 0..instances_per_dim {
+        for y in 0..instances_per_dim {
+            for z in 0..instances_per_dim {
+                instances.push(
+                    nalgebra::Matrix4::new_translation(
+                        &nalgebra::Vector3::new(
+                            (x as f32 * x_size) - (x_size * (instances_per_dim - 1) as f32 * 0.5),
+                            (y as f32 * y_size) - (y_size * (instances_per_dim - 1) as f32 * 0.5),
+                            (z as f32 * z_size) - (z_size * (instances_per_dim - 1) as f32 * 0.5)
+                        )
+                    )
+                );
+            }
         }
     }
 
@@ -977,22 +688,51 @@ fn main() {
         frames,
         align: hal::adapter::PhysicalDevice::limits(factory.physical())
             .min_uniform_buffer_offset_alignment,
-        scene: Scene {
-            camera: camera.unwrap(),
+        scene: scene::Scene {
+            camera,
             max_obj_instances: vec![
                 50,
             ],
             objects: vec![
-                (helmet.unwrap(), vec![nalgebra::Matrix4::identity()]),
+                (helmet.unwrap(), instances),
             ],
             lights: vec![
-                Light {
-                    pos: nalgebra::Vector3::new(10.0, 10.0, -10.0),
-                    _pad: 0.0,
+                scene::Light {
+                    pos: nalgebra::Vector3::new(10.0, 10.0, 2.0),
+                    intensity: 150.0,
                     color: [1.0, 1.0, 1.0],
-                    _pad1: 0.0,
-                    intensity: 160.0,
-                }
+                    _pad: 0.0,
+                },
+                scene::Light {
+                    pos: nalgebra::Vector3::new(10.25, 10.0, 2.0),
+                    intensity: 150.0,
+                    color: [1.0, 1.0, 1.0],
+                    _pad: 0.0,
+                },
+                scene::Light {
+                    pos: nalgebra::Vector3::new(10.25, 10.0, 2.25),
+                    intensity: 150.0,
+                    color: [1.0, 1.0, 1.0],
+                    _pad: 0.0,
+                },
+                scene::Light {
+                    pos: nalgebra::Vector3::new(10.0, 10.0, 2.25),
+                    intensity: 150.0,
+                    color: [1.0, 1.0, 1.0],
+                    _pad: 0.0,
+                },
+                scene::Light {
+                    pos: nalgebra::Vector3::new(-4.0, 0.0, -5.0),
+                    intensity: 350.0,
+                    color: [1.0, 1.0, 1.0],
+                    _pad: 0.0,
+                },
+                scene::Light {
+                    pos: nalgebra::Vector3::new(-5.0, 5.0, -2.0),
+                    intensity: 25.0,
+                    color: [1.0, 1.0, 1.0],
+                    _pad: 0.0,
+                },
             ]
         },
         material_storage,
@@ -1005,50 +745,39 @@ fn main() {
     let started = time::Instant::now();
 
     let mut frames = 0u64..;
-    let mut rng = rand::thread_rng();
-    let rxy = Uniform::new(-1.0, 1.0);
-    let rz = Uniform::new(0.0, 185.0);
 
-    let mut fpss = Vec::new();
     let mut checkpoint = started;
     let mut should_close = false;
 
+    let mut input = input::InputState::new();
+
     while !should_close {
         let start = frames.start;
-        let from = aux.scene.objects.len();
         for _ in &mut frames {
             factory.maintain(&mut families);
             event_loop.poll_events(|event| match event {
                 Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => should_close = true,
+                Event::WindowEvent { event, .. } => {
+                    input.handle_window_event(&event, &mut aux);
+                },
+                Event::DeviceEvent { event, .. } => {
+                    input.handle_device_event(&event, &mut aux);
+                }
                 _ => (),
             });
             graph.run(&mut factory, &mut families, &mut aux);
 
             let elapsed = checkpoint.elapsed();
 
-            // if aux.scene.objects.len() < MAX_OBJECTS {
-            //     aux.scene.objects.push({
-            //         let z = rz.sample(&mut rng);
-            //         nalgebra::Translation3::new(
-            //             rxy.sample(&mut rng) * (z / 2.0 + 4.0),
-            //             rxy.sample(&mut rng) * (z / 2.0 + 4.0),
-            //             -z,
-            //         )
-            //         .to_homogeneous()
-            //     })
-            // }
-
             if should_close || elapsed > std::time::Duration::new(5, 0) {
                 let frames = frames.start - start;
                 let nanos = elapsed.as_secs() * 1_000_000_000 + elapsed.subsec_nanos() as u64;
-                fpss.push((frames * 1_000_000_000 / nanos, from..aux.scene.objects.len()));
+                println!("FPS: {}", frames * 1_000_000_000 / nanos);
                 checkpoint += elapsed;
                 break;
             }
         }
     }
-
-    log::info!("FPS: {:#?}", fpss);
 
     graph.dispose(&mut factory, &mut aux);
 }
