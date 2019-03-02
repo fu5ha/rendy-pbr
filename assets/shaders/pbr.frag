@@ -5,27 +5,21 @@ layout(early_fragment_tests) in;
 
 layout(location = 0) in vec4 f_world_pos;
 layout(location = 1) in vec3 f_norm;
-layout(location = 2) in vec2 f_uv;
-layout(location = 3) in vec3 view_vec;
+layout(location = 2) in vec3 f_tang;
+layout(location = 3) in vec2 f_uv;
 
-layout(location = 0) out vec4 color;
-
-struct Light {
+layout(std140) struct Light {
     vec3 pos;
-    float pad;
-    vec3 color;
-    float pad1;
     float intensity;
+    vec3 color;
 };
 
 layout(std140, set = 0, binding = 0) uniform Args {
-    mat4 proj;
-    mat4 view;
-    vec3 camera_pos;
-    float pad;
-    int lights_count;
-    int pad1[3];
-    Light lights[32];
+    layout(offset = 0) mat4 proj;
+    layout(offset = 64) mat4 view;
+    layout(offset = 128) vec3 camera_pos;
+    layout(offset = 140) int lights_count;
+    layout(offset = 144) Light lights[32];
 };
 
 layout(set = 0, binding = 1) uniform sampler tex_sampler;
@@ -35,53 +29,84 @@ layout(set = 1, binding = 1) uniform texture2D normal_map;
 layout(set = 1, binding = 2) uniform texture2D metallic_roughness_map;
 layout(set = 1, binding = 3) uniform texture2D ao_map;
 
-// http://www.thetenthplanet.de/archives/1180
-mat3 cotangent_frame( vec3 N, vec3 p, vec2 uv ) {
-    // get edge vectors of the pixel triangle
-    vec3 dp1 = dFdx( p );
-    vec3 dp2 = dFdy( p );
-    vec2 duv1 = dFdx( uv );
-    vec2 duv2 = dFdy( uv );
- 
-    // solve the linear system
-    vec3 dp2perp = cross( dp2, N );
-    vec3 dp1perp = cross( N, dp1 );
-    vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
-    vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
- 
-    // construct a scale-invariant frame 
-    float invmax = inversesqrt( max( dot(T,T), dot(B,B) ) );
-    return mat3( T * invmax, B * invmax, N );
+layout(location = 0) out vec4 color;
+
+vec3 f_schlick(const vec3 f0, const float vh) {
+	return f0 + (1.0 - f0) * exp2((-5.55473 * vh - 6.98316) * vh);
+}
+
+float v_smithschlick(const float nl, const float nv, const float a) {
+	return 1.0 / ((nl * (1.0 - a) + a) * (nv * (1.0 - a) + a));
+}
+
+float d_ggx(const float nh, const float a) {
+	float a2 = a * a;
+	float denom = pow(nh * nh * (a2 - 1.0) + 1.0, 2.0);
+	return a2 * (1.0 / 3.1415926535) / denom;
+}
+
+vec3 specularBRDF(const vec3 f0, const float roughness, const float nl, const float nh, const float nv, const float vh) {
+	float a = roughness * roughness;
+	return d_ggx(nh, a) * clamp(v_smithschlick(nl, nv, a), 0.0, 1.0) * f_schlick(f0, vh) / 4.0;
+}
+
+vec3 lambertDiffuseBRDF(const vec3 albedo, const float nl) {
+	return albedo * max(0.0, nl);
 }
 
 vec3 saturate(vec3 v) {
-    return min(vec3(1.0), max(vec3(0.0), v));
+    return clamp(v, vec3(0.0), vec3(1.0));
+}
+
+float saturate(float v) {
+    return clamp(v, 0.0, 1.0);
 }
 
 void main() {
-
     vec3 albedo = texture(sampler2D(albedo_map, tex_sampler), f_uv).rgb;
     vec3 normal = texture(sampler2D(normal_map, tex_sampler), f_uv).rgb;
+    vec2 metallic_roughness = texture(sampler2D(metallic_roughness_map, tex_sampler), f_uv).bg;
+    float metallic = metallic_roughness.x;
+    float roughness = metallic_roughness.y;
+    float ao = texture(sampler2D(ao_map, tex_sampler), f_uv).r;
+
     normal = normal * 2.0 - 1.0;
 
-    vec3 V = normalize(view_vec);
+    vec3 V = normalize(camera_pos - f_world_pos.xyz);
 
-    mat3 TBN = cotangent_frame(normalize(f_norm), -V, f_uv);
+    vec3 N = normalize(f_norm);
+    vec3 T = normalize(f_tang - N * dot(N, f_tang));
+    vec3 B = normalize(cross(N, T));
+    mat3 TBN = mat3(T, B, N);
 
-    vec3 N = normalize(TBN * normal);
+    N = normalize(TBN * normal);
 
-    vec3 diffuse_acc = vec3(0.0);
-    vec3 specular_acc = vec3(0.0);
+    vec3 f0 = mix(vec3(0.04), albedo, metallic);
+
+    float NdotV = abs(dot(N, V)) + 0.00001;
+
+    vec3 acc = vec3(0.0);
     for (int i = 0; i < lights_count; ++i) {
         vec3 L = lights[i].pos - f_world_pos.xyz;
         float d2 = dot(L, L);
         L = normalize(L);
-        vec3 H = normalize(N + L);
+        vec3 H = normalize(V + L);
         vec3 l_contrib = lights[i].color * lights[i].intensity / d2;
-        float NdotL = dot(N, L);
-        float NdotH = dot(N, H);
-        diffuse_acc += l_contrib * NdotL;
-        specular_acc += l_contrib * pow(NdotH, 10.0);
+        // color = vec4(col_intensity.aaa, 1.0);
+        // return;
+        float NdotL = saturate(dot(N, L));
+        float NdotH = saturate(dot(N, H));
+        float VdotH = saturate(dot(H, V));
+        float a = roughness * roughness;
+        vec3 fresnel = f_schlick(f0, VdotH);
+        vec3 k_D = vec3(1.0) - fresnel;
+        k_D *= 1.0 - metallic;
+
+	    vec3 specular = d_ggx(NdotH, a) * clamp(v_smithschlick(NdotL, NdotV, a), 0.0, 1.0) * fresnel;
+        specular /= max(4.0 * NdotV * NdotL, 0.001);
+        vec3 diffuse = albedo / 3.1415926535 * k_D;
+        acc += (diffuse + specular) * NdotL * l_contrib;
     }
-    color = vec4(saturate(diffuse_acc * albedo + specular_acc), 1.0);
+    vec3 final = vec3(0.1, 0.3, 0.4) * 0.02 * ao + acc;
+    color = vec4(saturate(final), 1.0);
 }
