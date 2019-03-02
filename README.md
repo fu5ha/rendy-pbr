@@ -9,11 +9,11 @@ other helpers.
 * [x] Physically based shading model
 * [x] Point lights
 * [x] Basic `glTF` import
-* [] HDR rendering with a tone mapping pass
-* [] Diffuse and specular environment mapping
-* [] Directional lights
-* [] Shadow mapping
-* [] More robust `glTF` import
+* [ ] HDR rendering with a tone mapping pass
+* [ ] Diffuse and specular environment mapping
+* [ ] Directional lights
+* [ ] Shadow mapping
+* [ ] More robust `glTF` import
 
 # Screenshots
 
