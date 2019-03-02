@@ -92,8 +92,7 @@ void main() {
         L = normalize(L);
         vec3 H = normalize(V + L);
         vec3 l_contrib = lights[i].color * lights[i].intensity / d2;
-        // color = vec4(col_intensity.aaa, 1.0);
-        // return;
+
         float NdotL = saturate(dot(N, L));
         float NdotH = saturate(dot(N, H));
         float VdotH = saturate(dot(H, V));
@@ -101,10 +100,12 @@ void main() {
         vec3 fresnel = f_schlick(f0, VdotH);
         vec3 k_D = vec3(1.0) - fresnel;
         k_D *= 1.0 - metallic;
-
-	    vec3 specular = d_ggx(NdotH, a) * clamp(v_smithschlick(NdotL, NdotV, a), 0.0, 1.0) * fresnel;
+        
+        vec3 specular = d_ggx(NdotH, a) * clamp(v_smithschlick(NdotL, NdotV, a), 0.0, 1.0) * fresnel;
         specular /= max(4.0 * NdotV * NdotL, 0.001);
+
         vec3 diffuse = albedo / 3.1415926535 * k_D;
+
         acc += (diffuse + specular) * NdotL * l_contrib;
     }
     vec3 final = vec3(0.1, 0.3, 0.4) * 0.02 * ao + acc;
