@@ -109,5 +109,5 @@ void main() {
         acc += (diffuse + specular) * NdotL * l_contrib;
     }
     vec3 final = vec3(0.1, 0.3, 0.4) * 0.02 * ao + acc;
-    color = vec4(saturate(final), 1.0);
+    color = vec4(final, 1.0);
 }
