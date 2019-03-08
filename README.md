@@ -24,8 +24,8 @@ other helpers.
 
 ### Model controls
 * **X**: Add a row of models in the X direction
-* **Y**: Add a row of models in the X direction
-* **Z**: Add a row of models in the X direction
+* **Y**: Add a row of models in the Y direction
+* **Z**: Add a row of models in the Z direction
 
 \* *Hold shift to subtract a row*
 
