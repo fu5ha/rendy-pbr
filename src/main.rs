@@ -24,7 +24,9 @@ use winit::{EventsLoop, WindowBuilder, Event, WindowEvent};
 mod asset;
 mod scene;
 mod input;
-mod pass;
+mod node;
+
+pub const CUBEMAP_RES: u32 = 512;
 
 #[cfg(feature = "dx12")]
 pub type Backend = rendy::dx12::Backend;
@@ -37,15 +39,6 @@ pub type Backend = rendy::vulkan::Backend;
 
 #[cfg(feature = "empty")]
 pub type Backend = rendy::empty::Backend;
-
-pub struct Aux<B: hal::Backend> {
-    pub frames: usize,
-    pub align: u64,
-    pub instance_array_size: (usize, usize, usize),
-    pub scene: scene::Scene<B>,
-    pub material_storage: HashMap<u64, asset::Material<B>>,
-    pub tonemapper_args: pass::tonemap::TonemapperArgs,
-}
 
 pub fn generate_instances(size: (usize, usize, usize)) -> Vec<nalgebra::Matrix4<f32>> {
     let x_size = 3.0;
@@ -91,6 +84,40 @@ fn main() {
         .unwrap()
         .as_slice()[0]
         .id();
+
+    // Preprocess steps to load environment map, convert it to a cubemap,
+    // and filter it for use later
+    let mut env_preprocess_graph_builder = GraphBuilder::<Backend, node::env_preprocess::Aux<Backend>>::new();
+
+    let mut equirect_to_faces = node::env_preprocess::equirectangular_to_cube_faces::Pipeline::<Backend>::builder()
+        .into_subpass();
+
+    let cube_face_images = hal::image::CUBE_FACES
+        .into_iter()
+        .map(|_| {
+            env_preprocess_graph_builder.create_image(
+                hal::image::Kind::D2(CUBEMAP_RES, CUBEMAP_RES, 1, 1),
+                1,
+                hal::format::Format::Rgb32Float,
+                MemoryUsageValue::Data,
+                None,
+            )
+        })
+        .collect::<Vec<_>>();
+    
+    for image in cube_face_images.iter().cloned() {
+        equirect_to_faces.add_color(image);
+    }
+
+    let equirect_to_faces_pass = env_preprocess_graph_builder.add_node(equirect_to_faces.into_pass());
+
+    let faces_to_cubemap_pass = env_preprocess_graph_builder.add_node(
+        node::env_preprocess::faces_to_cubemap::FacesToCubemap::<Backend>::builder(cube_face_images)
+    );
+
+    let equirect_tex = texture::image::load_from_image()
+    
+    // Main window and render graph building
     let mut event_loop = EventsLoop::new();
 
     let window = WindowBuilder::new()
@@ -106,19 +133,19 @@ fn main() {
     let surface = factory.create_surface(window.into());
     let aspect = surface.aspect();
 
-    let mut graph_builder = GraphBuilder::<Backend, Aux<Backend>>::new();
+    let mut pbr_graph_builder = GraphBuilder::<Backend, node::pbr::Aux<Backend>>::new();
 
-    let hdr = graph_builder.create_image(
+    let hdr = pbr_graph_builder.create_image(
         surface.kind(),
         1,
-        hal::format::Format::Rgba32Float,
+        hal::format::Format::Rgb32Float,
         MemoryUsageValue::Data,
         Some(hal::command::ClearValue::Color(
             [0.1, 0.3, 0.4, 1.0].into(),
         )),
     );
 
-    let color = graph_builder.create_image(
+    let color = pbr_graph_builder.create_image(
         surface.kind(),
         1,
         factory.get_surface_format(&surface),
@@ -128,7 +155,7 @@ fn main() {
         )),
     );
 
-    let depth = graph_builder.create_image(
+    let depth = pbr_graph_builder.create_image(
         surface.kind(),
         1,
         hal::format::Format::D16Unorm,
@@ -138,16 +165,16 @@ fn main() {
         )),
     );
 
-    let mesh_pass = graph_builder.add_node(
-        pass::mesh::Pipeline::builder()
+    let mesh_pass = pbr_graph_builder.add_node(
+        node::pbr::mesh::Pipeline::builder()
             .into_subpass()
             .with_color(hdr)
             .with_depth_stencil(depth)
             .into_pass()
     );
 
-    let tonemap_pass = graph_builder.add_node(
-        pass::tonemap::Pipeline::builder()
+    let tonemap_pass = pbr_graph_builder.add_node(
+        node::pbr::tonemap::Pipeline::builder()
             .with_image(hdr)
             .into_subpass()
             .with_dependency(mesh_pass)
@@ -160,7 +187,7 @@ fn main() {
 
     let frames = present_builder.image_count() as usize;
 
-    graph_builder.add_node(present_builder);
+    pbr_graph_builder.add_node(present_builder);
 
     let mut material_storage = HashMap::new();
 
@@ -207,7 +234,7 @@ fn main() {
         ),
     };
     let instance_array_size = (1,1,1);
-    let mut aux = Aux {
+    let mut pbr_aux = node::pbr::Aux {
         frames,
         align: hal::adapter::PhysicalDevice::limits(factory.physical())
             .min_uniform_buffer_offset_alignment,
@@ -260,15 +287,15 @@ fn main() {
             ]
         },
         material_storage,
-        tonemapper_args: pass::tonemap::TonemapperArgs {
+        tonemapper_args: node::pbr::tonemap::TonemapperArgs {
             exposure: 2.5,
             curve: 0,
             comparison_factor: 0.5,
         }
     };
 
-    let mut graph = graph_builder
-        .build(&mut factory, &mut families, &mut aux)
+    let mut pbr_graph = pbr_graph_builder
+        .build(&mut factory, &mut families, &mut pbr_aux)
         .unwrap();
 
     let started = time::Instant::now();
@@ -285,15 +312,15 @@ fn main() {
             event_loop.poll_events(|event| match event {
                 Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => should_close = true,
                 Event::WindowEvent { event, .. } => {
-                    input.handle_window_event(&event, &mut aux);
+                    input.handle_window_event(&event, &mut pbr_aux);
                 },
                 Event::DeviceEvent { event, .. } => {
-                    input.handle_device_event(&event, &mut aux);
+                    input.handle_device_event(&event, &mut pbr_aux);
                 }
                 _ => (),
             });
-            aux.scene.objects[0].1 = generate_instances(aux.instance_array_size);
-            graph.run(&mut factory, &mut families, &mut aux);
+            pbr_aux.scene.objects[0].1 = generate_instances(pbr_aux.instance_array_size);
+            pbr_graph.run(&mut factory, &mut families, &mut pbr_aux);
 
             let elapsed = checkpoint.elapsed();
 
@@ -301,14 +328,14 @@ fn main() {
                 let frames = frames.start - start;
                 let nanos = elapsed.as_secs() * 1_000_000_000 + elapsed.subsec_nanos() as u64;
                 log::info!("FPS: {}", frames * 1_000_000_000 / nanos);
-                log::info!("Tonemapper Settings: {}", aux.tonemapper_args);
+                log::info!("Tonemapper Settings: {}", pbr_aux.tonemapper_args);
                 checkpoint += elapsed;
                 break;
             }
         }
     }
 
-    graph.dispose(&mut factory, &mut aux);
+    pbr_graph.dispose(&mut factory, &mut pbr_aux);
 }
 
 #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]

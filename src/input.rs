@@ -2,7 +2,7 @@ use winit::{WindowEvent, DeviceEvent, MouseButton, ElementState, MouseScrollDelt
 
 use gfx_hal as hal;
 
-use crate::Aux;
+use crate::node::pbr::Aux;
 
 #[derive(Clone, Copy)]
 pub struct MouseState {

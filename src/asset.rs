@@ -1,6 +1,6 @@
 use rendy::{
     mesh::{Mesh, PosNormTangTex},
-    factory::Factory,
+    factory::{Factory, ImageState},
     command::QueueId,
     texture::{pixel::{Rgba8Srgb, Rgba8Unorm}, Texture, TextureBuilder},
 };
@@ -247,9 +247,12 @@ fn load_texture_from_file<P, B>(factory: &mut Factory<B>, queue: QueueId, path: 
             .with_data_height(h)
             .with_data(&tex_img_data)
             .build(
-                queue,
-                hal::image::Access::SHADER_READ,
-                hal::image::Layout::ShaderReadOnlyOptimal,
+                ImageState {
+                    queue,
+                    stage: hal::pso::PipelineStage::FRAGMENT_SHADER,
+                    access: hal::image::Access::SHADER_READ,
+                    layout: hal::image::Layout::ShaderReadOnlyOptimal,
+                },
                 factory,
             )
             .unwrap()
@@ -266,9 +269,12 @@ fn load_texture_from_file<P, B>(factory: &mut Factory<B>, queue: QueueId, path: 
             .with_data_height(h)
             .with_data(&tex_img_data)
             .build(
-                queue,
-                hal::image::Access::SHADER_READ,
-                hal::image::Layout::ShaderReadOnlyOptimal,
+                ImageState {
+                    queue,
+                    stage: hal::pso::PipelineStage::FRAGMENT_SHADER,
+                    access: hal::image::Access::SHADER_READ,
+                    layout: hal::image::Layout::ShaderReadOnlyOptimal,
+                },
                 factory,
             )
             .unwrap()
