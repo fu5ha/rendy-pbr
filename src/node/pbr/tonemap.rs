@@ -11,7 +11,7 @@ use gfx_hal as hal;
 
 use std::mem::size_of;
 
-use crate::Aux;
+use crate::node::pbr::Aux;
 
 lazy_static::lazy_static! {
     static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
@@ -339,7 +339,7 @@ where
 
     fn dispose(mut self, factory: &mut Factory<B>, _aux: &mut Aux<B>) {
         unsafe {
-            self.descriptor_pool.free_sets(self.sets.into_iter());
+            self.descriptor_pool.reset();
             factory.destroy_descriptor_pool(self.descriptor_pool);
         }
     }

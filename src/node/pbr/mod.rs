@@ -1,4 +1,11 @@
-use crate::scene;
+use gfx_hal as hal;
+
+use std::collections::HashMap;
+
+use crate::{scene, asset};
+
+pub mod mesh;
+pub mod tonemap;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -22,5 +29,11 @@ impl From<scene::Camera> for CameraArgs {
     }
 }
 
-pub mod mesh;
-pub mod tonemap;
+pub struct Aux<B: hal::Backend> {
+    pub frames: usize,
+    pub align: u64,
+    pub instance_array_size: (usize, usize, usize),
+    pub scene: scene::Scene<B>,
+    pub material_storage: HashMap<u64, asset::Material<B>>,
+    pub tonemapper_args: tonemap::TonemapperArgs,
+}

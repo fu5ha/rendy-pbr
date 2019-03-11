@@ -16,7 +16,7 @@ use std::{
 
 use gfx_hal as hal;
 
-use crate::{scene, pass, Aux};
+use crate::{scene, node::pbr::{Aux, CameraArgs}};
 
 lazy_static::lazy_static! {
     static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
@@ -37,7 +37,7 @@ lazy_static::lazy_static! {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct UniformArgs {
-    camera: pass::CameraArgs,
+    camera: CameraArgs,
     num_lights: i32,
     lights: [scene::Light; scene::MAX_LIGHTS]
 }
@@ -386,7 +386,7 @@ where
         for (i, l) in aux.scene.lights.iter().enumerate() {
             lights[i] = *l;
         }
-        let camera_args: pass::CameraArgs = aux.scene.camera.into();
+        let camera_args: CameraArgs = aux.scene.camera.into();
         unsafe {
             factory
                 .upload_visible_buffer(
@@ -485,10 +485,7 @@ where
 
     fn dispose(mut self, factory: &mut Factory<B>, _aux: &mut Aux<B>) {
         unsafe {
-            self.descriptor_pool
-                .free_sets(self.frame_sets.into_iter());
-            self.descriptor_pool
-                .free_sets(self.mat_sets.into_iter().map(|(_, set)| set));
+            self.descriptor_pool.reset();
             factory.destroy_descriptor_pool(self.descriptor_pool);
         }
     }
