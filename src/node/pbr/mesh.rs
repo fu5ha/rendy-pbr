@@ -1,22 +1,26 @@
 use rendy::{
     command::{DrawIndexedCommand, QueueId, RenderPassEncoder},
-    factory::{Factory},
+    factory::Factory,
     graph::{render::*, NodeBuffer, NodeImage},
     hal::{pso::DescriptorPool, Device},
     memory::MemoryUsageValue,
     mesh::{AsVertex, PosNormTangTex, Transform},
-    resource::{buffer::Buffer, image::{Filter, WrapMode}, sampler::Sampler},
+    resource::{
+        buffer::Buffer,
+        image::{Filter, WrapMode},
+        sampler::Sampler,
+    },
     shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
 };
 
-use std::{
-    collections::HashMap,
-    mem::size_of,
-};
+use std::{collections::HashMap, mem::size_of};
 
 use gfx_hal as hal;
 
-use crate::{scene, node::pbr::{Aux, CameraArgs}};
+use crate::{
+    node::pbr::{Aux, CameraArgs},
+    scene,
+};
 
 lazy_static::lazy_static! {
     static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
@@ -39,7 +43,7 @@ lazy_static::lazy_static! {
 pub struct UniformArgs {
     camera: CameraArgs,
     num_lights: i32,
-    lights: [scene::Light; scene::MAX_LIGHTS]
+    lights: [scene::Light; scene::MAX_LIGHTS],
 }
 
 #[derive(Debug, Default)]
@@ -97,10 +101,8 @@ impl Settings {
 
     #[inline]
     fn buffer_frame_size(&self) -> u64 {
-        ((Self::UNIFORM_SIZE
-            + self.transform_size()
-            + self.indirect_size()
-            - 1) / self.align + 1) * self.align
+        ((Self::UNIFORM_SIZE + self.transform_size() + self.indirect_size() - 1) / self.align + 1)
+            * self.align
     }
 
     #[inline]
@@ -120,7 +122,11 @@ impl Settings {
 
     #[inline]
     fn obj_transforms_offset(&self, obj_index: usize) -> u64 {
-        self.max_obj_instances[0..obj_index].iter().map(|n| *n as u64).sum::<u64>() * size_of::<Transform>() as u64
+        self.max_obj_instances[0..obj_index]
+            .iter()
+            .map(|n| *n as u64)
+            .sum::<u64>()
+            * size_of::<Transform>() as u64
     }
 
     #[inline]
@@ -153,29 +159,22 @@ where
                     stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
                     immutable_samplers: false,
                 },
-            ]
+            ],
         };
         // SampledImage for each texture map, can reuse same sampler
         let mut bindings = Vec::with_capacity(4);
         for i in 0..4 {
-            bindings.push(
-                hal::pso::DescriptorSetLayoutBinding {
-                    binding: i,
-                    ty: hal::pso::DescriptorType::SampledImage,
-                    count: 1,
-                    stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
-                    immutable_samplers: false,
-                }
-            );
+            bindings.push(hal::pso::DescriptorSetLayoutBinding {
+                binding: i,
+                ty: hal::pso::DescriptorType::SampledImage,
+                count: 1,
+                stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                immutable_samplers: false,
+            });
         }
-        let material_layout = SetLayout {
-            bindings,
-        };
+        let material_layout = SetLayout { bindings };
         Layout {
-            sets: vec![
-                all_layout,
-                material_layout,
-            ],
+            sets: vec![all_layout, material_layout],
             push_constants: Vec::new(),
         }
     }
@@ -276,7 +275,9 @@ where
             )
             .unwrap();
 
-        let texture_sampler = factory.create_sampler(Filter::Linear, WrapMode::Clamp).unwrap();
+        let texture_sampler = factory
+            .create_sampler(Filter::Linear, WrapMode::Clamp)
+            .unwrap();
 
         let mut frame_sets = Vec::with_capacity(frames);
         for index in 0..frames {
@@ -289,16 +290,17 @@ where
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Buffer(
                             buffer.raw(),
-                            Some(settings.uniform_offset(index as u64))..Some(settings.uniform_offset(index as u64) + Settings::UNIFORM_SIZE),
+                            Some(settings.uniform_offset(index as u64))
+                                ..Some(
+                                    settings.uniform_offset(index as u64) + Settings::UNIFORM_SIZE,
+                                ),
                         )),
                     },
                     hal::pso::DescriptorSetWrite {
                         set: &set,
                         binding: 1,
                         array_offset: 0,
-                        descriptors: Some(hal::pso::Descriptor::Sampler(
-                            texture_sampler.raw(),
-                        )),
+                        descriptors: Some(hal::pso::Descriptor::Sampler(texture_sampler.raw())),
                     },
                 ]);
                 frame_sets.push(set);
@@ -401,15 +403,16 @@ where
                 .unwrap()
         };
 
-        let cmds = aux.scene.objects.iter()
-            .map(|(o, instances)| {
-                DrawIndexedCommand {
-                    index_count: o.mesh.len(),
-                    instance_count: instances.len() as u32,
-                    first_index: 0,
-                    vertex_offset: 0,
-                    first_instance: 0,
-                }
+        let cmds = aux
+            .scene
+            .objects
+            .iter()
+            .map(|(o, instances)| DrawIndexedCommand {
+                index_count: o.mesh.len(),
+                instance_count: instances.len() as u32,
+                first_index: 0,
+                vertex_offset: 0,
+                first_instance: 0,
             })
             .collect::<Vec<_>>();
 
@@ -424,7 +427,9 @@ where
         };
 
         let transforms_offset = self.settings.transforms_offset(index as u64);
-        aux.scene.objects.iter()
+        aux.scene
+            .objects
+            .iter()
             .enumerate()
             .for_each(|(i, (_obj, instances))| {
                 unsafe {
@@ -457,21 +462,23 @@ where
         let transforms_offset = self.settings.transforms_offset(index as u64);
         let indirect_offset = self.settings.indirect_offset(index as u64);
         for (mat_hash, set) in self.mat_sets.iter() {
-            encoder.bind_graphics_descriptor_sets(
-                layout,
-                1,
-                Some(set),
-                std::iter::empty(),
-            );
-            aux.scene.objects.iter().enumerate()
+            encoder.bind_graphics_descriptor_sets(layout, 1, Some(set), std::iter::empty());
+            aux.scene
+                .objects
+                .iter()
+                .enumerate()
                 .filter(|(_, (o, _))| o.material == *mat_hash)
-                .for_each(|(i, (obj, _instances))|{
-                    assert!(obj.mesh
+                .for_each(|(i, (obj, _instances))| {
+                    assert!(obj
+                        .mesh
                         .bind(&[PosNormTangTex::VERTEX], &mut encoder)
                         .is_ok());
                     encoder.bind_vertex_buffers(
                         1,
-                        std::iter::once((self.buffer.raw(), transforms_offset + self.settings.obj_transforms_offset(i))),
+                        std::iter::once((
+                            self.buffer.raw(),
+                            transforms_offset + self.settings.obj_transforms_offset(i),
+                        )),
                     );
                     encoder.draw_indexed_indirect(
                         self.buffer.raw(),

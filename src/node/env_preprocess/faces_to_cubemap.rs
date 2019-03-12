@@ -1,16 +1,15 @@
 use rendy::{
     command::{
         CommandBuffer, CommandPool, ExecutableState, Family, FamilyId, Fence, MultiShot,
-        PendingState, Queue, SimultaneousUse, Submission, Submit, Transfer, Supports
+        PendingState, Queue, SimultaneousUse, Submission, Submit, Supports, Transfer,
     },
     factory::{Factory, ImageState},
     frame::Frames,
     graph::{
-        gfx_acquire_barriers, gfx_release_barriers, BufferAccess, DynNode, ImageAccess, NodeBuffer,
-        NodeBuilder, NodeImage, BufferId, ImageId, NodeId,
+        gfx_acquire_barriers, gfx_release_barriers, BufferAccess, BufferId, DynNode, ImageAccess,
+        ImageId, NodeBuffer, NodeBuilder, NodeId, NodeImage,
     },
     texture::Texture,
-    wsi::{Backbuffer, Surface, Target},
 };
 
 use gfx_hal as hal;
@@ -19,11 +18,8 @@ use gfx_hal as hal;
 pub struct FacesToCubemap<B: hal::Backend> {
     pool: CommandPool<B, hal::QueueType>,
     submit: Submit<B, SimultaneousUse>,
-    buffer: CommandBuffer<
-        B,
-        hal::QueueType,
-        PendingState<ExecutableState<MultiShot<SimultaneousUse>>>,
-    >,
+    buffer:
+        CommandBuffer<B, hal::QueueType, PendingState<ExecutableState<MultiShot<SimultaneousUse>>>>,
 }
 
 impl<B: hal::Backend> FacesToCubemap<B> {
@@ -42,8 +38,7 @@ pub struct FacesToCubemapBuilder {
     dependencies: Vec<NodeId>,
 }
 
-impl FacesToCubemapBuilder
-{
+impl FacesToCubemapBuilder {
     /// Add dependency.
     /// Node will be placed after its dependencies.
     pub fn add_dependency(&mut self, dependency: NodeId) -> &mut Self {
@@ -64,7 +59,7 @@ pub trait FacesToCubemapResource<B: hal::Backend> {
     fn cubemap_end_state(&self) -> ImageState;
 }
 
-impl <B, FR> NodeBuilder<B, FR> for FacesToCubemapBuilder
+impl<B, FR> NodeBuilder<B, FR> for FacesToCubemapBuilder
 where
     B: gfx_hal::Backend,
     FR: FacesToCubemapResource<B>,
@@ -83,18 +78,20 @@ where
     fn images(&self) -> Vec<(ImageId, ImageAccess)> {
         self.faces
             .iter()
-            .map(|&image| (
-                image,
-                ImageAccess {
-                    access: gfx_hal::image::Access::TRANSFER_READ,
-                    layout: gfx_hal::image::Layout::TransferSrcOptimal,
-                    usage: gfx_hal::image::Usage::TRANSFER_SRC,
-                    stages: gfx_hal::pso::PipelineStage::TRANSFER,
-                },
-            ))
+            .map(|&image| {
+                (
+                    image,
+                    ImageAccess {
+                        access: gfx_hal::image::Access::TRANSFER_READ,
+                        layout: gfx_hal::image::Layout::TransferSrcOptimal,
+                        usage: gfx_hal::image::Usage::TRANSFER_SRC,
+                        stages: gfx_hal::pso::PipelineStage::TRANSFER,
+                    },
+                )
+            })
             .collect::<_>()
     }
-    
+
     fn dependencies(&self) -> Vec<NodeId> {
         self.dependencies.clone()
     }
@@ -140,11 +137,7 @@ where
                 },
             });
             log::info!("Acquire {:?} : {:#?}", stages, barriers);
-            encoder.pipeline_barrier(
-                stages,
-                gfx_hal::memory::Dependencies::empty(),
-                barriers,
-            );
+            encoder.pipeline_barrier(stages, gfx_hal::memory::Dependencies::empty(), barriers);
         }
         for (i, face) in images.iter().enumerate() {
             let i = i as u16;
@@ -183,11 +176,7 @@ where
                 states: (
                     gfx_hal::image::Access::TRANSFER_WRITE,
                     gfx_hal::image::Layout::TransferDstOptimal,
-                )
-                    ..(
-                    end_state.access,
-                    end_state.layout,
-                ),
+                )..(end_state.access, end_state.layout),
                 families: None,
                 target: target_cubemap.image.raw(),
                 range: gfx_hal::image::SubresourceRange {
@@ -198,11 +187,7 @@ where
             });
 
             log::info!("Release {:?} : {:#?}", stages, barriers);
-            encoder.pipeline_barrier(
-                stages,
-                gfx_hal::memory::Dependencies::empty(),
-                barriers,
-            );
+            encoder.pipeline_barrier(stages, gfx_hal::memory::Dependencies::empty(), barriers);
         }
 
         let (submit, buffer) = buf_recording.finish().submit();
@@ -210,7 +195,7 @@ where
         Ok(Box::new(FacesToCubemap {
             pool,
             submit,
-            buffer
+            buffer,
         }))
     }
 }
@@ -230,13 +215,12 @@ where
         signals: &[&'a B::Semaphore],
         fence: Option<&mut Fence<B>>,
     ) {
-
         queue.submit(
             Some(
                 Submission::new()
                     .submits(Some(&self.submit))
                     .wait(waits.iter().cloned())
-                    .signal(signals.iter())
+                    .signal(signals.iter()),
             ),
             fence,
         );

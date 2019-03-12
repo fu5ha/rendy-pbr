@@ -1,9 +1,13 @@
 use rendy::{
     command::{QueueId, RenderPassEncoder},
-    factory::{Factory},
-    graph::{render::*, NodeBuffer, NodeImage, ImageAccess},
+    factory::Factory,
+    graph::{render::*, ImageAccess, NodeBuffer, NodeImage},
     hal::{pso::DescriptorPool, Device},
-    resource::{buffer::Buffer, image::{ImageView, Filter, WrapMode, ViewKind}, sampler::Sampler},
+    resource::{
+        buffer::Buffer,
+        image::{Filter, ImageView, ViewKind, WrapMode},
+        sampler::Sampler,
+    },
     shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
 };
 
@@ -70,9 +74,7 @@ impl Settings {
     const UNIFORM_SIZE: u64 = size_of::<UniformArgs>() as u64;
 
     fn from_aux<B: hal::Backend>(aux: &Aux<B>) -> Self {
-        Settings {
-            align: aux.align,
-        }
+        Settings { align: aux.align }
     }
 
     #[inline]
@@ -106,14 +108,12 @@ where
     type Pipeline = Pipeline<B>;
 
     fn images(&self) -> Vec<ImageAccess> {
-        vec![
-            ImageAccess {
-                access: rendy::resource::image::Access::SHADER_READ,
-                usage: hal::image::Usage::SAMPLED,
-                layout: hal::image::Layout::ShaderReadOnlyOptimal,
-                stages: hal::pso::PipelineStage::FRAGMENT_SHADER,
-            }
-        ]
+        vec![ImageAccess {
+            access: rendy::resource::image::Access::SHADER_READ,
+            usage: hal::image::Usage::SAMPLED,
+            layout: hal::image::Layout::ShaderReadOnlyOptimal,
+            stages: hal::pso::PipelineStage::FRAGMENT_SHADER,
+        }]
     }
 
     fn depth_stencil(&self) -> Option<gfx_hal::pso::DepthStencilDesc> {
@@ -153,33 +153,31 @@ where
 
     fn layout(&self) -> Layout {
         Layout {
-            sets: vec![
-                SetLayout {
-                    bindings: vec![
-                        hal::pso::DescriptorSetLayoutBinding {
-                            binding: 0,
-                            ty: hal::pso::DescriptorType::Sampler,
-                            count: 1,
-                            stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
-                            immutable_samplers: false,
-                        },
-                        hal::pso::DescriptorSetLayoutBinding {
-                            binding: 1,
-                            ty: hal::pso::DescriptorType::SampledImage,
-                            count: 1,
-                            stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
-                            immutable_samplers: false,
-                        },
-                        hal::pso::DescriptorSetLayoutBinding {
-                            binding: 2,
-                            ty: hal::pso::DescriptorType::UniformBuffer,
-                            count: 1,
-                            stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
-                            immutable_samplers: false,
-                        }
-                    ]
-                }
-            ],
+            sets: vec![SetLayout {
+                bindings: vec![
+                    hal::pso::DescriptorSetLayoutBinding {
+                        binding: 0,
+                        ty: hal::pso::DescriptorType::Sampler,
+                        count: 1,
+                        stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                        immutable_samplers: false,
+                    },
+                    hal::pso::DescriptorSetLayoutBinding {
+                        binding: 1,
+                        ty: hal::pso::DescriptorType::SampledImage,
+                        count: 1,
+                        stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                        immutable_samplers: false,
+                    },
+                    hal::pso::DescriptorSetLayoutBinding {
+                        binding: 2,
+                        ty: hal::pso::DescriptorType::UniformBuffer,
+                        count: 1,
+                        stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                        immutable_samplers: false,
+                    },
+                ],
+            }],
             push_constants: Vec::new(),
         }
     }
@@ -222,15 +220,19 @@ where
         }
         .unwrap();
 
-        let image_sampler = factory.create_sampler(Filter::Nearest, WrapMode::Clamp).unwrap();
+        let image_sampler = factory
+            .create_sampler(Filter::Nearest, WrapMode::Clamp)
+            .unwrap();
 
-        let image_view = factory.create_image_view(
-            images[0].image,
-            ViewKind::D2,
-            hal::format::Format::Rgba32Float,
-            hal::format::Swizzle::NO,
-            images[0].range.clone(),
-        ).expect("Could not create tonemapper input image view");
+        let image_view = factory
+            .create_image_view(
+                images[0].image,
+                ViewKind::D2,
+                hal::format::Format::Rgba32Float,
+                hal::format::Swizzle::NO,
+                images[0].range.clone(),
+            )
+            .expect("Could not create tonemapper input image view");
 
         let buffer = factory
             .create_buffer(
@@ -250,11 +252,9 @@ where
                 factory.write_descriptor_sets(vec![
                     hal::pso::DescriptorSetWrite {
                         set: &set,
-                        binding: 0, 
+                        binding: 0,
                         array_offset: 0,
-                        descriptors: Some(hal::pso::Descriptor::Sampler(
-                            image_sampler.raw(),
-                        )),
+                        descriptors: Some(hal::pso::Descriptor::Sampler(image_sampler.raw())),
                     },
                     hal::pso::DescriptorSetWrite {
                         set: &set,
@@ -271,7 +271,10 @@ where
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Buffer(
                             buffer.raw(),
-                            Some(settings.uniform_offset(index as u64))..Some(settings.uniform_offset(index as u64) + Settings::UNIFORM_SIZE),
+                            Some(settings.uniform_offset(index as u64))
+                                ..Some(
+                                    settings.uniform_offset(index as u64) + Settings::UNIFORM_SIZE,
+                                ),
                         )),
                     },
                 ]);

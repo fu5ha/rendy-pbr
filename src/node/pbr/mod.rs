@@ -2,7 +2,7 @@ use gfx_hal as hal;
 
 use std::collections::HashMap;
 
-use crate::{scene, asset};
+use crate::{asset, scene};
 
 pub mod mesh;
 pub mod tonemap;
@@ -24,8 +24,10 @@ impl From<scene::Camera> for CameraArgs {
                 proj
             },
             view: cam.view.to_homogeneous(),
-            camera_pos: nalgebra::Point3::from(cam.view.rotation.inverse() * (cam.view.translation.vector * -1.0)),
-        }   
+            camera_pos: nalgebra::Point3::from(
+                cam.view.rotation.inverse() * (cam.view.translation.vector * -1.0),
+            ),
+        }
     }
 }
 
