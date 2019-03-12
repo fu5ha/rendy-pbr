@@ -1,18 +1,24 @@
-use rendy::{
-    mesh::{Mesh, PosNormTangTex},
-    factory::{Factory, ImageState},
-    command::QueueId,
-    texture::{pixel::{Rgba8Srgb, Rgba8Unorm}, Texture, TextureBuilder},
-};
-use gfx_hal as hal;
 use derivative::Derivative;
+use gfx_hal as hal;
+use rendy::{
+    command::QueueId,
+    factory::{Factory, ImageState},
+    mesh::{Mesh, PosNormTangTex},
+    texture::{
+        image::{ImageTextureConfig, Repr},
+        Texture, TextureBuilder,
+    },
+};
 
 use std::{
-    collections::{HashMap, hash_map::{DefaultHasher, Entry}},
-    hash::{Hash, Hasher},
+    collections::{
+        hash_map::{DefaultHasher, Entry},
+        HashMap,
+    },
     fs::File,
-    path::Path,
+    hash::{Hash, Hasher},
     io::Read,
+    path::Path,
 };
 
 use crate::scene::Object;
@@ -29,15 +35,15 @@ pub struct Factors {
 #[derive(Derivative)]
 #[derivative(Eq, PartialEq)]
 pub struct Material<B: hal::Backend> {
-    #[derivative(PartialEq="ignore")]
+    #[derivative(PartialEq = "ignore")]
     pub factors: Factors,
-    #[derivative(PartialEq="ignore")]
+    #[derivative(PartialEq = "ignore")]
     pub albedo: Texture<B>,
-    #[derivative(PartialEq="ignore")]
+    #[derivative(PartialEq = "ignore")]
     pub normal: Texture<B>,
-    #[derivative(PartialEq="ignore")]
+    #[derivative(PartialEq = "ignore")]
     pub metallic_roughness: Texture<B>,
-    #[derivative(PartialEq="ignore")]
+    #[derivative(PartialEq = "ignore")]
     pub ao: Texture<B>,
     pub hash: u64,
 }
@@ -54,11 +60,13 @@ impl GltfBuffers {
                         unimplemented!();
                     } else {
                         let mut file = File::open(base_path.as_ref().join(uri)).unwrap();
-                        let mut data: Vec<u8> = Vec::with_capacity(file.metadata().unwrap().len() as usize);
-                        file.read_to_end(&mut data).expect("Failed to read gltf binary data");
+                        let mut data: Vec<u8> =
+                            Vec::with_capacity(file.metadata().unwrap().len() as usize);
+                        file.read_to_end(&mut data)
+                            .expect("Failed to read gltf binary data");
                         data
                     }
-                },
+                }
                 Source::Bin => unimplemented!(),
             };
 
@@ -91,7 +99,7 @@ pub fn object_from_gltf<P: AsRef<Path>, B: hal::Backend>(
     material_storage: &mut HashMap<u64, Material<B>>,
     factory: &mut Factory<B>,
     queue: QueueId,
-) -> Object<B> {
+) -> Result<Object<B>, failure::Error> {
     if mesh.primitives().len() != 1 {
         unimplemented!();
     }
@@ -99,44 +107,46 @@ pub fn object_from_gltf<P: AsRef<Path>, B: hal::Backend>(
     let primitive = mesh.primitives().next().unwrap();
     let reader = primitive.reader(|buf_id| buffers.buffer(&buf_id));
 
-
-    let indices = reader.read_indices()
+    let indices = reader
+        .read_indices()
         .unwrap()
         .into_u32()
         .collect::<Vec<u32>>();
 
     let positions = reader.read_positions().unwrap();
     let normals = reader.read_normals().unwrap();
-    let tangents = reader
-        .read_tangents()
-        .unwrap()
-        .map(|t| [t[0], t[1], t[2]]);
+    let tangents = reader.read_tangents().unwrap().map(|t| [t[0], t[1], t[2]]);
     let uvs = reader.read_tex_coords(0).unwrap().into_f32();
 
     let vertices = positions
         .zip(normals.zip(tangents.zip(uvs)))
-        .map(|(pos, (norm, (tang, uv)))|
-            PosNormTangTex {
-                position: pos.into(),
-                normal: norm.into(),
-                tangent: tang.into(),
-                tex_coord: uv.into(),
-            })
+        .map(|(pos, (norm, (tang, uv)))| PosNormTangTex {
+            position: pos.into(),
+            normal: norm.into(),
+            tangent: tang.into(),
+            tex_coord: uv.into(),
+        })
         .collect::<Vec<_>>();
-    
+
     let mesh = Mesh::<Backend>::builder()
         .with_indices(&indices[..])
         .with_vertices(&vertices[..])
         .build(queue, factory)
         .unwrap();
-    
+
     let material = primitive.material();
 
     let pbr_met_rough = material.pbr_metallic_roughness();
 
     let mut hasher = DefaultHasher::new();
     gltf_texture_uri(pbr_met_rough.base_color_texture().unwrap().texture()).hash(&mut hasher);
-    gltf_texture_uri(pbr_met_rough.metallic_roughness_texture().unwrap().texture()).hash(&mut hasher);
+    gltf_texture_uri(
+        pbr_met_rough
+            .metallic_roughness_texture()
+            .unwrap()
+            .texture(),
+    )
+    .hash(&mut hasher);
     gltf_texture_uri(material.normal_texture().unwrap().texture()).hash(&mut hasher);
     gltf_texture_uri(material.occlusion_texture().unwrap().texture()).hash(&mut hasher);
 
@@ -149,39 +159,45 @@ pub fn object_from_gltf<P: AsRef<Path>, B: hal::Backend>(
             roughness: pbr_met_rough.roughness_factor(),
         };
 
-        let albedo = load_gltf_texture(
-            factory,
+        let state = ImageState {
             queue,
+            stage: hal::pso::PipelineStage::FRAGMENT_SHADER,
+            access: hal::image::Access::SHADER_READ,
+            layout: hal::image::Layout::ShaderReadOnlyOptimal,
+        };
+
+        let albedo = load_gltf_texture(
             &base_dir,
             pbr_met_rough.base_color_texture().unwrap().texture(),
             true,
-        );
+        )?
+        .build(state, factory)?;
 
         let metallic_roughness = load_gltf_texture(
-            factory,
-            queue,
             &base_dir,
-            pbr_met_rough.metallic_roughness_texture().unwrap().texture(),
+            pbr_met_rough
+                .metallic_roughness_texture()
+                .unwrap()
+                .texture(),
             false,
-        );
+        )?
+        .build(state, factory)?;
 
         let normal = load_gltf_texture(
-            factory,
-            queue,
             &base_dir,
             material.normal_texture().unwrap().texture(),
             false,
-        );
+        )?
+        .build(state, factory)?;
 
         let ao = load_gltf_texture(
-            factory,
-            queue,
             &base_dir,
             material.occlusion_texture().unwrap().texture(),
             false,
-        );
+        )?
+        .build(state, factory)?;
 
-        e.insert(Material{
+        e.insert(Material {
             factors,
             albedo,
             metallic_roughness,
@@ -191,10 +207,10 @@ pub fn object_from_gltf<P: AsRef<Path>, B: hal::Backend>(
         });
     }
 
-    Object {
+    Ok(Object {
         mesh,
         material: hash,
-    }
+    })
 }
 
 fn gltf_texture_uri(texture: gltf::Texture<'_>) -> String {
@@ -205,78 +221,25 @@ fn gltf_texture_uri(texture: gltf::Texture<'_>) -> String {
     }
 }
 
-fn load_gltf_texture<B, P>(factory: &mut Factory<B>, queue: QueueId, base_dir: P, texture: gltf::Texture<'_>, srgb: bool)
-    -> Texture<B>
-    where B: hal::Backend,
-        P: AsRef<Path>
+fn load_gltf_texture<P>(
+    base_dir: P,
+    texture: gltf::Texture<'_>,
+    srgb: bool,
+) -> Result<TextureBuilder<'static>, failure::Error>
+where
+    P: AsRef<Path>,
 {
     match texture.source().source() {
         gltf::image::Source::View { .. } => unimplemented!(),
-        gltf::image::Source::Uri { uri, .. } => {
-            load_texture_from_file(factory, queue, base_dir.as_ref().join(uri), srgb)
-        }
-    }
-}
-
-fn load_texture_from_file<P, B>(factory: &mut Factory<B>, queue: QueueId, path: P, srgb: bool)
-    -> Texture<B>
-    where B: hal::Backend,
-        P: AsRef<Path>,
-{
-    let mut file = File::open(&path).unwrap();
-    let mut tex_bytes: Vec<u8> = Vec::with_capacity(file.metadata().unwrap().len() as usize);
-    file.read_to_end(&mut tex_bytes).expect(&format!("Failed to read texture data for: {:?}", path.as_ref().to_str()));
-
-    let tex_img = image::load_from_memory(&tex_bytes[..])
-        .unwrap()
-        .to_rgba();
-
-    let (w, h) = tex_img.dimensions();
-
-
-    if srgb {
-        let tex_img_data = tex_img
-            .pixels()
-            .map(|p| Rgba8Srgb { repr: p.data })
-            .collect::<Vec<_>>();
-
-        TextureBuilder::new()
-            .with_kind(hal::image::Kind::D2(w, h, 1, 1))
-            .with_view_kind(hal::image::ViewKind::D2)
-            .with_data_width(w)
-            .with_data_height(h)
-            .with_data(&tex_img_data)
-            .build(
-                ImageState {
-                    queue,
-                    stage: hal::pso::PipelineStage::FRAGMENT_SHADER,
-                    access: hal::image::Access::SHADER_READ,
-                    layout: hal::image::Layout::ShaderReadOnlyOptimal,
+        gltf::image::Source::Uri { uri, .. } => rendy::texture::image::load_from_image(
+            std::io::BufReader::new(File::open(base_dir.as_ref().join(uri))?),
+            ImageTextureConfig {
+                repr: match srgb {
+                    true => Some(Repr::Srgb),
+                    false => Some(Repr::Unorm),
                 },
-                factory,
-            )
-            .unwrap()
-    } else {
-        let tex_img_data = tex_img
-            .pixels()
-            .map(|p| Rgba8Unorm { repr: p.data })
-            .collect::<Vec<_>>();
-
-        TextureBuilder::new()
-            .with_kind(hal::image::Kind::D2(w, h, 1, 1))
-            .with_view_kind(hal::image::ViewKind::D2)
-            .with_data_width(w)
-            .with_data_height(h)
-            .with_data(&tex_img_data)
-            .build(
-                ImageState {
-                    queue,
-                    stage: hal::pso::PipelineStage::FRAGMENT_SHADER,
-                    access: hal::image::Access::SHADER_READ,
-                    layout: hal::image::Layout::ShaderReadOnlyOptimal,
-                },
-                factory,
-            )
-            .unwrap()
+                ..Default::default()
+            },
+        ),
     }
 }

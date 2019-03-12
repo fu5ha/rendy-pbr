@@ -1,8 +1,4 @@
-use rendy::{
-    command::{QueueId, FamilyId},
-    factory::ImageState,
-    texture::Texture,
-};
+use rendy::{command::QueueId, factory::ImageState, texture::Texture};
 
 use gfx_hal as hal;
 
@@ -10,13 +6,14 @@ pub mod equirectangular_to_cube_faces;
 pub mod faces_to_cubemap;
 
 pub struct Aux<B: hal::Backend> {
-    align: u64,
-    equirectangular_texture: Texture<B>,
-    environment_cubemap: Texture<B>,
+    pub align: u64,
+    pub equirectangular_texture: Texture<B>,
+    pub environment_cubemap: Texture<B>,
 }
 
 impl<B> faces_to_cubemap::FacesToCubemapResource<B> for Aux<B>
-    where B: hal::Backend
+where
+    B: hal::Backend,
 {
     fn get_cubemap(&self) -> &Texture<B> {
         &self.environment_cubemap
