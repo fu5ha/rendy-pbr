@@ -8,6 +8,7 @@ use rendy::{
     factory::{Config, Factory, ImageState},
     graph::{present::PresentNode, render::*, GraphBuilder},
     memory::MemoryUsageValue,
+    resource::image::{RenderTargetSampled, TextureUsage},
 };
 
 use std::{collections::HashMap, fs::File, path::Path, time};
@@ -127,6 +128,8 @@ fn main() {
     let equirect_tex = rendy::texture::image::load_from_image(
         std::io::BufReader::new(equirect_file),
         Default::default(),
+        TextureUsage,
+        factory.physical(),
     )
     .unwrap()
     .build(
@@ -137,6 +140,7 @@ fn main() {
             layout: hal::image::Layout::ShaderReadOnlyOptimal,
         },
         &mut factory,
+        TextureUsage,
     )
     .unwrap();
 
@@ -148,7 +152,7 @@ fn main() {
             1,
         ))
         .with_view_kind(rendy::resource::image::ViewKind::Cube)
-        .with_raw_format(hal::format::Format::Rgb32Float)
+        .with_raw_format(hal::format::Format::Rgba32Float)
         .build(
             ImageState {
                 queue,
@@ -157,6 +161,7 @@ fn main() {
                 layout: hal::image::Layout::TransferDstOptimal,
             },
             &mut factory,
+            RenderTargetSampled,
         )
         .unwrap();
 
