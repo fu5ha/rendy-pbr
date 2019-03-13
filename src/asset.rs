@@ -4,6 +4,7 @@ use rendy::{
     command::QueueId,
     factory::{Factory, ImageState},
     mesh::{Mesh, PosNormTangTex},
+    resource::image::TextureUsage,
     texture::{
         image::{ImageTextureConfig, Repr},
         Texture, TextureBuilder,
@@ -170,8 +171,9 @@ pub fn object_from_gltf<P: AsRef<Path>, B: hal::Backend>(
             &base_dir,
             pbr_met_rough.base_color_texture().unwrap().texture(),
             true,
+            factory.physical(),
         )?
-        .build(state, factory)?;
+        .build(state, factory, TextureUsage)?;
 
         let metallic_roughness = load_gltf_texture(
             &base_dir,
@@ -180,22 +182,25 @@ pub fn object_from_gltf<P: AsRef<Path>, B: hal::Backend>(
                 .unwrap()
                 .texture(),
             false,
+            factory.physical(),
         )?
-        .build(state, factory)?;
+        .build(state, factory, TextureUsage)?;
 
         let normal = load_gltf_texture(
             &base_dir,
             material.normal_texture().unwrap().texture(),
             false,
+            factory.physical(),
         )?
-        .build(state, factory)?;
+        .build(state, factory, TextureUsage)?;
 
         let ao = load_gltf_texture(
             &base_dir,
             material.occlusion_texture().unwrap().texture(),
             false,
+            factory.physical(),
         )?
-        .build(state, factory)?;
+        .build(state, factory, TextureUsage)?;
 
         e.insert(Material {
             factors,
@@ -221,12 +226,14 @@ fn gltf_texture_uri(texture: gltf::Texture<'_>) -> String {
     }
 }
 
-fn load_gltf_texture<P>(
+fn load_gltf_texture<B, P>(
     base_dir: P,
     texture: gltf::Texture<'_>,
     srgb: bool,
+    physical: &dyn hal::PhysicalDevice<B>,
 ) -> Result<TextureBuilder<'static>, failure::Error>
 where
+    B: hal::Backend,
     P: AsRef<Path>,
 {
     match texture.source().source() {
@@ -240,6 +247,8 @@ where
                 },
                 ..Default::default()
             },
+            TextureUsage,
+            physical,
         ),
     }
 }
