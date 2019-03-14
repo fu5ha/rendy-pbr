@@ -20,6 +20,6 @@ layout(location = 0) out vec4 color[6];
 
 void main() {
     vec2 uv = SampleSphericalMap(normalize(f_pos));
-    vec3 col = texture(sampler2D(equirectangular_sampler, equirectangular_texture), uv);
+    vec3 col = texture(sampler2D(equirectangular_texture, equirectangular_sampler), uv).rgb;
     color[face_index] = vec4(col, 1.0);
 }

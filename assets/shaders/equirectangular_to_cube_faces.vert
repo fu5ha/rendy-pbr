@@ -13,7 +13,7 @@ layout (push_constant) uniform PushConsts {
 };
 
 layout(location = 0) out vec3 f_pos;
-layout(location = 1) flat out int vertex_index;
+layout(location = 1) flat out int face_index;
 
 void main() {
     f_pos = a_pos;
