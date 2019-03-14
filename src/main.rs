@@ -8,7 +8,7 @@ use rendy::{
     factory::{Config, Factory, ImageState},
     graph::{present::PresentNode, render::*, GraphBuilder},
     memory::MemoryUsageValue,
-    resource::image::{RenderTargetSampled, TextureUsage},
+    resource::image::TextureUsage,
 };
 
 use std::{collections::HashMap, fs::File, path::Path, time};
@@ -100,9 +100,9 @@ fn main() -> Result<(), failure::Error> {
             env_preprocess_graph_builder.create_image(
                 hal::image::Kind::D2(CUBEMAP_RES, CUBEMAP_RES, 1, 1),
                 1,
-                hal::format::Format::Rgb32Float,
+                hal::format::Format::Rgba32Float,
                 MemoryUsageValue::Data,
-                None,
+                Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
             )
         })
         .collect::<Vec<_>>();
@@ -160,7 +160,7 @@ fn main() -> Result<(), failure::Error> {
                 layout: hal::image::Layout::TransferDstOptimal,
             },
             &mut factory,
-            RenderTargetSampled,
+            TextureUsage,
         )?;
 
     let mut env_preprocess_aux = node::env_preprocess::Aux {
@@ -172,7 +172,9 @@ fn main() -> Result<(), failure::Error> {
     let mut env_preprocess_graph =
         env_preprocess_graph_builder.build(&mut factory, &mut families, &mut env_preprocess_aux)?;
 
+    factory.maintain(&mut families);
     env_preprocess_graph.run(&mut factory, &mut families, &mut env_preprocess_aux);
+    env_preprocess_graph.dispose(&mut factory, &mut env_preprocess_aux);
 
     // Main window and render graph building
     let mut event_loop = EventsLoop::new();
@@ -194,7 +196,7 @@ fn main() -> Result<(), failure::Error> {
     let hdr = pbr_graph_builder.create_image(
         surface.kind(),
         1,
-        hal::format::Format::Rgb32Float,
+        hal::format::Format::Rgba32Float,
         MemoryUsageValue::Data,
         Some(hal::command::ClearValue::Color([0.1, 0.3, 0.4, 1.0].into())),
     );

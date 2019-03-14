@@ -76,12 +76,17 @@ impl Settings {
 #[derive(Debug, Default)]
 pub struct PipelineDesc;
 
-#[derive(Debug)]
 pub struct Pipeline<B: gfx_hal::Backend> {
     cube: Mesh<B>,
     set: B::DescriptorSet,
     pool: B::DescriptorPool,
     buffer: Buffer<B>,
+}
+
+impl<B: gfx_hal::Backend> std::fmt::Debug for Pipeline<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Equirect Pipeline")
+    }
 }
 
 impl<B> SimpleGraphicsPipelineDesc<B, Aux<B>> for PipelineDesc
@@ -98,6 +103,16 @@ where
         gfx_hal::pso::InstanceRate,
     )> {
         vec![Position::VERTEX.gfx_vertex_input_desc(0)]
+    }
+
+    fn colors(&self) -> Vec<gfx_hal::pso::ColorBlendDesc> {
+        vec![
+            gfx_hal::pso::ColorBlendDesc(
+                gfx_hal::pso::ColorMask::ALL,
+                gfx_hal::pso::BlendState::ALPHA,
+            );
+            6
+        ]
     }
 
     fn depth_stencil(&self) -> Option<gfx_hal::pso::DepthStencilDesc> {
@@ -148,14 +163,14 @@ where
                     },
                     gfx_hal::pso::DescriptorSetLayoutBinding {
                         binding: 1,
-                        ty: gfx_hal::pso::DescriptorType::SampledImage,
+                        ty: gfx_hal::pso::DescriptorType::Sampler,
                         count: 1,
                         stage_flags: gfx_hal::pso::ShaderStageFlags::FRAGMENT,
                         immutable_samplers: false,
                     },
                     gfx_hal::pso::DescriptorSetLayoutBinding {
                         binding: 2,
-                        ty: gfx_hal::pso::DescriptorType::Sampler,
+                        ty: gfx_hal::pso::DescriptorType::SampledImage,
                         count: 1,
                         stage_flags: gfx_hal::pso::ShaderStageFlags::FRAGMENT,
                         immutable_samplers: false,

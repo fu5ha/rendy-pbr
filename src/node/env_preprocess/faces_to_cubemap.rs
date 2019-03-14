@@ -116,28 +116,11 @@ where
         let target_cubemap = aux.get_cubemap();
 
         {
-            let (mut stages, mut barriers) = gfx_acquire_barriers(None, images.iter());
-            stages.start |= gfx_hal::pso::PipelineStage::TRANSFER;
-            stages.end |= gfx_hal::pso::PipelineStage::TRANSFER;
-            barriers.push(gfx_hal::memory::Barrier::Image {
-                states: (
-                    gfx_hal::image::Access::empty(),
-                    gfx_hal::image::Layout::Undefined,
-                )
-                    ..(
-                        gfx_hal::image::Access::TRANSFER_WRITE,
-                        gfx_hal::image::Layout::TransferDstOptimal,
-                    ),
-                families: None,
-                target: target_cubemap.image.raw(),
-                range: gfx_hal::image::SubresourceRange {
-                    aspects: gfx_hal::format::Aspects::COLOR,
-                    levels: 0..1,
-                    layers: 0..1,
-                },
-            });
+            let (stages, barriers) = gfx_acquire_barriers(None, images.iter());
             log::info!("Acquire {:?} : {:#?}", stages, barriers);
-            encoder.pipeline_barrier(stages, gfx_hal::memory::Dependencies::empty(), barriers);
+            if !barriers.is_empty() {
+                encoder.pipeline_barrier(stages, gfx_hal::memory::Dependencies::empty(), barriers);
+            }
         }
         for (i, face) in images.iter().enumerate() {
             let i = i as u16;
