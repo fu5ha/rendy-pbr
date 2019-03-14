@@ -216,13 +216,11 @@ where
                         count: frames,
                     },
                 ],
-            )
-        }
-        .unwrap();
+            )?
+        };
 
         let image_sampler = factory
-            .create_sampler(Filter::Nearest, WrapMode::Clamp)
-            .unwrap();
+            .create_sampler(Filter::Nearest, WrapMode::Clamp)?;
 
         let image_view = factory
             .create_image_view(
@@ -242,13 +240,12 @@ where
                     hal::buffer::Usage::UNIFORM,
                     rendy::memory::MemoryUsageValue::Dynamic,
                 ),
-            )
-            .unwrap();
+            )?;
 
         let mut sets = Vec::with_capacity(frames);
         for index in 0..frames {
             unsafe {
-                let set = descriptor_pool.allocate_set(&set_layouts[0]).unwrap();
+                let set = descriptor_pool.allocate_set(&set_layouts[0])?;
                 factory.write_descriptor_sets(vec![
                     hal::pso::DescriptorSetWrite {
                         set: &set,
@@ -314,8 +311,7 @@ where
                     &[UniformArgs {
                         tonemapper: aux.tonemapper_args,
                     }],
-                )
-                .unwrap()
+                )?
         };
         PrepareResult::DrawReuse
     }

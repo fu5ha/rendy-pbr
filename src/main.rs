@@ -18,11 +18,13 @@ use gfx_hal as hal;
 use winit::{Event, EventsLoop, WindowBuilder, WindowEvent};
 
 mod asset;
+mod components;
 mod input;
 mod node;
-mod scene;
+mod systems;
 
 pub const CUBEMAP_RES: u32 = 512;
+pub const MAX_LIGHTS: usize = 32;
 
 #[cfg(feature = "dx12")]
 pub type Backend = rendy::dx12::Backend;
@@ -56,7 +58,7 @@ pub fn generate_instances(size: (usize, usize, usize)) -> Vec<nalgebra::Matrix4<
 }
 
 #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-fn main() {
+fn main() -> Result<(), failure::Error> {
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Warn)
         .filter_module("rendy_pbr", log::LevelFilter::Trace)
@@ -64,7 +66,7 @@ fn main() {
 
     let config: Config = Default::default();
 
-    let (mut factory, mut families): (Factory<Backend>, _) = rendy::factory::init(config).unwrap();
+    let (mut factory, mut families): (Factory<Backend>, _) = rendy::factory::init(config)?;
 
     let align = hal::adapter::PhysicalDevice::limits(factory.physical())
         .min_uniform_buffer_offset_alignment;
@@ -122,16 +124,14 @@ fn main() {
     let equirect_file = std::fs::File::open(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/assets/environment/abandoned_hall_01_4k.hdr"
-    ))
-    .unwrap();
+    ))?;
 
     let equirect_tex = rendy::texture::image::load_from_image(
         std::io::BufReader::new(equirect_file),
         Default::default(),
         TextureUsage,
         factory.physical(),
-    )
-    .unwrap()
+    )?
     .build(
         ImageState {
             queue,
@@ -141,8 +141,7 @@ fn main() {
         },
         &mut factory,
         TextureUsage,
-    )
-    .unwrap();
+    )?;
 
     let cubemap_tex = rendy::texture::TextureBuilder::new()
         .with_kind(rendy::resource::image::Kind::D2(
@@ -162,8 +161,7 @@ fn main() {
             },
             &mut factory,
             RenderTargetSampled,
-        )
-        .unwrap();
+        )?;
 
     let mut env_preprocess_aux = node::env_preprocess::Aux {
         align,
@@ -171,9 +169,8 @@ fn main() {
         environment_cubemap: cubemap_tex,
     };
 
-    let mut env_preprocess_graph = env_preprocess_graph_builder
-        .build(&mut factory, &mut families, &mut env_preprocess_aux)
-        .unwrap();
+    let mut env_preprocess_graph =
+        env_preprocess_graph_builder.build(&mut factory, &mut families, &mut env_preprocess_aux)?;
 
     env_preprocess_graph.run(&mut factory, &mut families, &mut env_preprocess_aux);
 
@@ -183,8 +180,7 @@ fn main() {
     let window = WindowBuilder::new()
         .with_title("rendy-pbr")
         .with_dimensions(winit::dpi::LogicalSize::new(1280.0, 960.0))
-        .build(&event_loop)
-        .unwrap();
+        .build(&event_loop)?;
 
     let mut input = input::InputState::new(window.get_inner_size().unwrap());
 
@@ -247,14 +243,14 @@ fn main() {
 
     let mut material_storage = HashMap::new();
 
-    let mut helmet: Option<scene::Object<Backend>> = None;
+    let mut helmet: Option<scene::Object> = None;
     {
         let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/gltf/helmet/");
-        let file = File::open(base_path.join("SciFiHelmet.gltf")).unwrap();
+        let file = File::open(base_path.join("SciFiHelmet.gltf"))?;
         let reader = std::io::BufReader::new(file);
-        let gltf = gltf::Gltf::from_reader(reader).unwrap();
+        let gltf = gltf::Gltf::from_reader(reader)?;
 
-        let gltf_buffers = asset::GltfBuffers::load_from_gltf(&base_path, &gltf);
+        let gltf_buffers = asset::GltfBuffers::load_from_gltf(&base_path, &gltf)?;
 
         let scene = gltf.scenes().next().unwrap();
 
@@ -262,17 +258,14 @@ fn main() {
             match node.name() {
                 Some("SciFiHelmet") => {
                     if let Some(mesh) = node.mesh() {
-                        helmet = Some(
-                            asset::object_from_gltf(
-                                &mesh,
-                                &base_path,
-                                &gltf_buffers,
-                                &mut material_storage,
-                                &mut factory,
-                                queue,
-                            )
-                            .unwrap(),
-                        );
+                        helmet = Some(asset::object_from_gltf(
+                            &mesh,
+                            &base_path,
+                            &gltf_buffers,
+                            &mut material_storage,
+                            &mut factory,
+                            queue,
+                        )?);
                     }
                 }
                 _ => (),
@@ -299,7 +292,7 @@ fn main() {
         scene: scene::Scene {
             camera,
             max_obj_instances: vec![512],
-            objects: vec![(helmet.unwrap(), generate_instances(instance_array_size))],
+            objects: vec![(helmet?, generate_instances(instance_array_size))],
             lights: vec![
                 scene::Light {
                     pos: nalgebra::Vector3::new(10.0, 10.0, 2.0),
@@ -347,9 +340,7 @@ fn main() {
         },
     };
 
-    let mut pbr_graph = pbr_graph_builder
-        .build(&mut factory, &mut families, &mut pbr_aux)
-        .unwrap();
+    let mut pbr_graph = pbr_graph_builder.build(&mut factory, &mut families, &mut pbr_aux)?;
 
     let started = time::Instant::now();
 
@@ -392,9 +383,11 @@ fn main() {
     }
 
     pbr_graph.dispose(&mut factory, &mut pbr_aux);
+    Ok(())
 }
 
 #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
-fn main() {
+fn main() -> Result<(), failure::Error> {
     panic!("Specify feature: { dx12, metal, vulkan }");
+    Ok(())
 }

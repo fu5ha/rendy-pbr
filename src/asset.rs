@@ -1,9 +1,9 @@
-use derivative::Derivative;
+use failure::format_err;
 use gfx_hal as hal;
 use rendy::{
     command::QueueId,
     factory::{Factory, ImageState},
-    mesh::{Mesh, PosNormTangTex},
+    mesh::PosNormTangTex,
     resource::image::TextureUsage,
     texture::{
         image::{ImageTextureConfig, Repr},
@@ -11,47 +11,48 @@ use rendy::{
     },
 };
 
-use std::{
-    collections::{
-        hash_map::{DefaultHasher, Entry},
-        HashMap,
-    },
-    fs::File,
-    hash::{Hash, Hasher},
-    io::Read,
-    path::Path,
-};
+use std::{fs::File, io::Read, path::Path};
 
-use crate::scene::Object;
 use crate::Backend;
 
 #[derive(Clone, Copy, Default)]
 #[repr(C, align(16))]
-pub struct Factors {
+pub struct MaterialFactors {
     pub albedo: [f32; 4],
     pub metallic: f32,
     pub roughness: f32,
 }
 
-#[derive(Derivative)]
-#[derivative(Eq, PartialEq)]
-pub struct Material<B: hal::Backend> {
-    #[derivative(PartialEq = "ignore")]
-    pub factors: Factors,
-    #[derivative(PartialEq = "ignore")]
+pub struct MaterialData<B: hal::Backend> {
+    pub factors: MaterialFactors,
     pub albedo: Texture<B>,
-    #[derivative(PartialEq = "ignore")]
     pub normal: Texture<B>,
-    #[derivative(PartialEq = "ignore")]
     pub metallic_roughness: Texture<B>,
-    #[derivative(PartialEq = "ignore")]
     pub ao: Texture<B>,
-    pub hash: u64,
 }
+
+pub struct MaterialStorage<B: hal::Backend>(pub Vec<MaterialData<B>>);
+pub type MaterialHandle = usize;
+
+pub struct Primitive<B: hal::Backend> {
+    pub mesh: rendy::mesh::Mesh<B>,
+    pub mat: MaterialHandle,
+}
+
+pub struct PrimitiveStorage<B: hal::Backend>(pub Vec<Primitive<B>>);
+pub type PrimitiveHandle = usize;
+
+pub struct Mesh(Vec<PrimitiveHandle>);
+pub struct MeshStorage(Vec<Mesh>);
+pub type MeshHandle = usize;
+
 pub struct GltfBuffers(pub Vec<Vec<u8>>);
 
 impl GltfBuffers {
-    pub fn load_from_gltf<P: AsRef<Path>>(base_path: P, gltf: &gltf::Gltf) -> Self {
+    pub fn load_from_gltf<P: AsRef<Path>>(
+        base_path: P,
+        gltf: &gltf::Gltf,
+    ) -> Result<Self, failure::Error> {
         use gltf::buffer::Source;
         let mut buffers = vec![];
         for (_index, buffer) in gltf.buffers().enumerate() {
@@ -60,11 +61,9 @@ impl GltfBuffers {
                     if uri.starts_with("data:") {
                         unimplemented!();
                     } else {
-                        let mut file = File::open(base_path.as_ref().join(uri)).unwrap();
-                        let mut data: Vec<u8> =
-                            Vec::with_capacity(file.metadata().unwrap().len() as usize);
-                        file.read_to_end(&mut data)
-                            .expect("Failed to read gltf binary data");
+                        let mut file = File::open(base_path.as_ref().join(uri))?;
+                        let mut data: Vec<u8> = Vec::with_capacity(file.metadata()?.len() as usize);
+                        file.read_to_end(&mut data)?;
                         data
                     }
                 }
@@ -74,7 +73,7 @@ impl GltfBuffers {
             assert!(data.len() >= buffer.length());
             buffers.push(data);
         }
-        GltfBuffers(buffers)
+        Ok(GltfBuffers(buffers))
     }
 
     /// Obtain the contents of a loaded buffer.
@@ -93,129 +92,142 @@ impl GltfBuffers {
     }
 }
 
-pub fn object_from_gltf<P: AsRef<Path>, B: hal::Backend>(
+pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
     mesh: &gltf::Mesh<'_>,
     base_dir: P,
     buffers: &GltfBuffers,
-    material_storage: &mut HashMap<u64, Material<B>>,
+    material_storage: &mut MaterialStorage<B>,
+    primitive_storage: &mut PrimitiveStorage<B>,
+    mesh_storage: &mut MeshStorage,
     factory: &mut Factory<B>,
     queue: QueueId,
-) -> Result<Object<B>, failure::Error> {
-    if mesh.primitives().len() != 1 {
-        unimplemented!();
-    }
+) -> Result<MeshHandle, failure::Error> {
+    let mut primitives = Vec::new();
 
-    let primitive = mesh.primitives().next().unwrap();
-    let reader = primitive.reader(|buf_id| buffers.buffer(&buf_id));
+    for primitive in mesh.primitives() {
+        let reader = primitive.reader(|buf_id| buffers.buffer(&buf_id));
 
-    let indices = reader
-        .read_indices()
-        .unwrap()
-        .into_u32()
-        .collect::<Vec<u32>>();
+        let indices = reader
+            .read_indices()
+            .ok_or(format_err!("Mesh primitive does not contain indices"))?
+            .into_u32()
+            .collect::<Vec<u32>>();
 
-    let positions = reader.read_positions().unwrap();
-    let normals = reader.read_normals().unwrap();
-    let tangents = reader.read_tangents().unwrap().map(|t| [t[0], t[1], t[2]]);
-    let uvs = reader.read_tex_coords(0).unwrap().into_f32();
+        let positions = reader
+            .read_positions()
+            .ok_or(format_err!("Primitive does not have positions"))?;
+        let normals = reader
+            .read_normals()
+            .ok_or(format_err!("Primitive does not have normals"))?;
+        let tangents = reader
+            .read_tangents()
+            .ok_or(format_err!("Primitive does not have tangents"))?
+            .map(|t| [t[0], t[1], t[2]]);
+        let uvs = reader
+            .read_tex_coords(0)
+            .ok_or(format_err!("Primitive does not have tex coords"))?
+            .into_f32();
 
-    let vertices = positions
-        .zip(normals.zip(tangents.zip(uvs)))
-        .map(|(pos, (norm, (tang, uv)))| PosNormTangTex {
-            position: pos.into(),
-            normal: norm.into(),
-            tangent: tang.into(),
-            tex_coord: uv.into(),
-        })
-        .collect::<Vec<_>>();
+        let vertices = positions
+            .zip(normals.zip(tangents.zip(uvs)))
+            .map(|(pos, (norm, (tang, uv)))| PosNormTangTex {
+                position: pos.into(),
+                normal: norm.into(),
+                tangent: tang.into(),
+                tex_coord: uv.into(),
+            })
+            .collect::<Vec<_>>();
 
-    let mesh = Mesh::<Backend>::builder()
-        .with_indices(&indices[..])
-        .with_vertices(&vertices[..])
-        .build(queue, factory)
-        .unwrap();
+        let prim_mesh = rendy::mesh::Mesh::<Backend>::builder()
+            .with_indices(&indices[..])
+            .with_vertices(&vertices[..])
+            .build(queue, factory)?;
 
-    let material = primitive.material();
+        let material = primitive.material();
+        let mat_idx = material
+            .index()
+            .ok_or(format_err!("Default material unimplemented"))?;
 
-    let pbr_met_rough = material.pbr_metallic_roughness();
+        if let None = material_storage.0.get(mat_idx) {
+            let pbr_met_rough = material.pbr_metallic_roughness();
 
-    let mut hasher = DefaultHasher::new();
-    gltf_texture_uri(pbr_met_rough.base_color_texture().unwrap().texture()).hash(&mut hasher);
-    gltf_texture_uri(
-        pbr_met_rough
-            .metallic_roughness_texture()
-            .unwrap()
-            .texture(),
-    )
-    .hash(&mut hasher);
-    gltf_texture_uri(material.normal_texture().unwrap().texture()).hash(&mut hasher);
-    gltf_texture_uri(material.occlusion_texture().unwrap().texture()).hash(&mut hasher);
+            let factors = MaterialFactors {
+                albedo: pbr_met_rough.base_color_factor(),
+                metallic: pbr_met_rough.metallic_factor(),
+                roughness: pbr_met_rough.roughness_factor(),
+            };
 
-    let hash = hasher.finish();
+            let state = ImageState {
+                queue,
+                stage: hal::pso::PipelineStage::FRAGMENT_SHADER,
+                access: hal::image::Access::SHADER_READ,
+                layout: hal::image::Layout::ShaderReadOnlyOptimal,
+            };
 
-    if let Entry::Vacant(e) = material_storage.entry(hash) {
-        let factors = Factors {
-            albedo: pbr_met_rough.base_color_factor(),
-            metallic: pbr_met_rough.metallic_factor(),
-            roughness: pbr_met_rough.roughness_factor(),
-        };
+            let albedo = load_gltf_texture(
+                &base_dir,
+                pbr_met_rough
+                    .base_color_texture()
+                    .ok_or(format_err!("Material has no base color texture"))?
+                    .texture(),
+                true,
+                factory.physical(),
+            )?
+            .build(state, factory, TextureUsage)?;
 
-        let state = ImageState {
-            queue,
-            stage: hal::pso::PipelineStage::FRAGMENT_SHADER,
-            access: hal::image::Access::SHADER_READ,
-            layout: hal::image::Layout::ShaderReadOnlyOptimal,
-        };
+            let metallic_roughness = load_gltf_texture(
+                &base_dir,
+                pbr_met_rough
+                    .metallic_roughness_texture()
+                    .ok_or(format_err!("Material has no metallic_roughness texture"))?
+                    .texture(),
+                false,
+                factory.physical(),
+            )?
+            .build(state, factory, TextureUsage)?;
 
-        let albedo = load_gltf_texture(
-            &base_dir,
-            pbr_met_rough.base_color_texture().unwrap().texture(),
-            true,
-            factory.physical(),
-        )?
-        .build(state, factory, TextureUsage)?;
+            let normal = load_gltf_texture(
+                &base_dir,
+                material
+                    .normal_texture()
+                    .ok_or(format_err!("Material has no normal texture"))?
+                    .texture(),
+                false,
+                factory.physical(),
+            )?
+            .build(state, factory, TextureUsage)?;
 
-        let metallic_roughness = load_gltf_texture(
-            &base_dir,
-            pbr_met_rough
-                .metallic_roughness_texture()
-                .unwrap()
-                .texture(),
-            false,
-            factory.physical(),
-        )?
-        .build(state, factory, TextureUsage)?;
+            let ao = load_gltf_texture(
+                &base_dir,
+                material
+                    .occlusion_texture()
+                    .ok_or(format_err!("Material has no occlusion texture"))?
+                    .texture(),
+                false,
+                factory.physical(),
+            )?
+            .build(state, factory, TextureUsage)?;
 
-        let normal = load_gltf_texture(
-            &base_dir,
-            material.normal_texture().unwrap().texture(),
-            false,
-            factory.physical(),
-        )?
-        .build(state, factory, TextureUsage)?;
+            material_storage.0[mat_idx] = MaterialData {
+                factors,
+                albedo,
+                metallic_roughness,
+                normal,
+                ao,
+            };
+        }
 
-        let ao = load_gltf_texture(
-            &base_dir,
-            material.occlusion_texture().unwrap().texture(),
-            false,
-            factory.physical(),
-        )?
-        .build(state, factory, TextureUsage)?;
-
-        e.insert(Material {
-            factors,
-            albedo,
-            metallic_roughness,
-            normal,
-            ao,
-            hash,
+        primitive_storage.0.push(Primitive {
+            mesh: prim_mesh,
+            mat: mat_idx as MaterialHandle,
         });
+
+        primitives.push(primitive_storage.0.len() - 1);
     }
 
-    Ok(Object {
-        mesh,
-        material: hash,
-    })
+    mesh_storage.0[mesh.index()] = Mesh(primitives);
+
+    Ok(mesh.index() as MeshHandle)
 }
 
 fn gltf_texture_uri(texture: gltf::Texture<'_>) -> String {
