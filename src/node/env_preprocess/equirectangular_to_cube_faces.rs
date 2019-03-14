@@ -192,8 +192,7 @@ where
         let cube = Mesh::<B>::builder()
             .with_indices(&cube_indices[..])
             .with_vertices(&cube_vertices[..])
-            .build(queue, factory)
-            .unwrap();
+            .build(queue, factory)?;
 
         let mut pool = unsafe {
             factory.create_descriptor_pool(
@@ -212,9 +211,8 @@ where
                         count: 1,
                     },
                 ],
-            )
-        }
-        .unwrap();
+            )?
+        };
 
         let settings: Settings = aux.into();
 
@@ -226,11 +224,10 @@ where
                     hal::buffer::Usage::UNIFORM,
                     MemoryUsageValue::Dynamic,
                 ),
-            )
-            .unwrap();
+            )?;
 
         let set = unsafe {
-            let set = pool.allocate_set(&set_layouts[0]).unwrap();
+            let set = pool.allocate_set(&set_layouts[0])?;
             factory.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
                     set: &set,
@@ -283,8 +280,7 @@ where
                             nalgebra::Matrix4::look_at_rh(&origin, &nalgebra::Point3::new(0.0, -1.0, 0.0), &nalgebra::Vector3::z()),
                         ]
                     }],
-                )
-                .unwrap()
+                )?
         };
 
         Ok(Pipeline { 

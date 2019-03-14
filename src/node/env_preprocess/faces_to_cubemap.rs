@@ -110,7 +110,7 @@ where
 
         let mut pool = factory.create_command_pool(family)?;
 
-        let buf_initial = pool.allocate_buffers(1).pop().unwrap();
+        let buf_initial = pool.allocate_buffers(1).pop()?;
         let mut buf_recording = buf_initial.begin(MultiShot(SimultaneousUse), ());
         let mut encoder = buf_recording.encoder();
         let target_cubemap = aux.get_cubemap();

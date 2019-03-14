@@ -256,9 +256,8 @@ where
                         count: num_mats * 4,
                     },
                 ],
-            )
-        }
-        .unwrap();
+            )?
+        };
 
         let settings = Settings::from_aux(aux);
 
@@ -272,17 +271,15 @@ where
                         | hal::buffer::Usage::VERTEX,
                     MemoryUsageValue::Dynamic,
                 ),
-            )
-            .unwrap();
+            )?;
 
         let texture_sampler = factory
-            .create_sampler(Filter::Linear, WrapMode::Clamp)
-            .unwrap();
+            .create_sampler(Filter::Linear, WrapMode::Clamp)?;
 
         let mut frame_sets = Vec::with_capacity(frames);
         for index in 0..frames {
             unsafe {
-                let set = descriptor_pool.allocate_set(&set_layouts[0]).unwrap();
+                let set = descriptor_pool.allocate_set(&set_layouts[0])?;
                 factory.write_descriptor_sets(vec![
                     hal::pso::DescriptorSetWrite {
                         set: &set,
@@ -311,7 +308,7 @@ where
 
         for (mat_hash, material) in aux.material_storage.iter() {
             unsafe {
-                let set = descriptor_pool.allocate_set(&set_layouts[1]).unwrap();
+                let set = descriptor_pool.allocate_set(&set_layouts[1])?;
                 factory.write_descriptor_sets(vec![
                     hal::pso::DescriptorSetWrite {
                         set: &set,
@@ -399,8 +396,7 @@ where
                         num_lights: aux.scene.lights.len() as i32,
                         lights,
                     }],
-                )
-                .unwrap()
+                )?
         };
 
         let cmds = aux
@@ -422,8 +418,7 @@ where
                     &mut self.buffer,
                     self.settings.indirect_offset(index as u64),
                     &cmds,
-                )
-                .unwrap()
+                )?
         };
 
         let transforms_offset = self.settings.transforms_offset(index as u64);
@@ -438,8 +433,7 @@ where
                             &mut self.buffer,
                             transforms_offset + self.settings.obj_transforms_offset(i),
                             &instances[..],
-                        )
-                        .unwrap()
+                        )?
                 };
             });
 
