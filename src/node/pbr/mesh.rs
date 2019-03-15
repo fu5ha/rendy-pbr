@@ -261,20 +261,18 @@ where
 
         let settings = Settings::from_aux(aux);
 
-        let buffer = factory
-            .create_buffer(
-                aux.align,
-                settings.buffer_frame_size() * frames as u64,
-                (
-                    hal::buffer::Usage::UNIFORM
-                        | hal::buffer::Usage::INDIRECT
-                        | hal::buffer::Usage::VERTEX,
-                    MemoryUsageValue::Dynamic,
-                ),
-            )?;
+        let buffer = factory.create_buffer(
+            aux.align,
+            settings.buffer_frame_size() * frames as u64,
+            (
+                hal::buffer::Usage::UNIFORM
+                    | hal::buffer::Usage::INDIRECT
+                    | hal::buffer::Usage::VERTEX,
+                MemoryUsageValue::Dynamic,
+            ),
+        )?;
 
-        let texture_sampler = factory
-            .create_sampler(Filter::Linear, WrapMode::Clamp)?;
+        let texture_sampler = factory.create_sampler(Filter::Linear, WrapMode::Clamp)?;
 
         let mut frame_sets = Vec::with_capacity(frames);
         for index in 0..frames {
@@ -396,7 +394,8 @@ where
                         num_lights: aux.scene.lights.len() as i32,
                         lights,
                     }],
-                )?
+                )
+                .unwrap()
         };
 
         let cmds = aux
@@ -418,7 +417,8 @@ where
                     &mut self.buffer,
                     self.settings.indirect_offset(index as u64),
                     &cmds,
-                )?
+                )
+                .unwrap()
         };
 
         let transforms_offset = self.settings.transforms_offset(index as u64);
@@ -433,7 +433,8 @@ where
                             &mut self.buffer,
                             transforms_offset + self.settings.obj_transforms_offset(i),
                             &instances[..],
-                        )?
+                        )
+                        .unwrap()
                 };
             });
 

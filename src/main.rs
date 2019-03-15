@@ -15,6 +15,8 @@ use std::{collections::HashMap, fs::File, path::Path, time};
 
 use gfx_hal as hal;
 
+use specs::prelude::*;
+
 use winit::{Event, EventsLoop, WindowBuilder, WindowEvent};
 
 mod asset;
@@ -38,7 +40,7 @@ pub type Backend = rendy::vulkan::Backend;
 #[cfg(feature = "empty")]
 pub type Backend = rendy::empty::Backend;
 
-pub fn generate_instances(size: (usize, usize, usize)) -> Vec<nalgebra::Matrix4<f32>> {
+pub fn generate_instances(size: (usize, usize, usize)) -> Vec<nalgebra::Similarity3<f32>> {
     let x_size = 3.0;
     let y_size = 4.0;
     let z_size = 4.0;
@@ -46,11 +48,15 @@ pub fn generate_instances(size: (usize, usize, usize)) -> Vec<nalgebra::Matrix4<
     for x in 0..size.0 {
         for y in 0..size.1 {
             for z in 0..size.2 {
-                instances.push(nalgebra::Matrix4::new_translation(&nalgebra::Vector3::new(
-                    (x as f32 * x_size) - (x_size * (size.0 - 1) as f32 * 0.5),
-                    (y as f32 * y_size) - (y_size * (size.1 - 1) as f32 * 0.5),
-                    (z as f32 * z_size) - (z_size * (size.2 - 1) as f32 * 0.5),
-                )));
+                instances.push(nalgebra::Similarity3::from_parts(
+                    nalgebra::Translation3::new(
+                        (x as f32 * x_size) - (x_size * (size.0 - 1) as f32 * 0.5),
+                        (y as f32 * y_size) - (y_size * (size.1 - 1) as f32 * 0.5),
+                        (z as f32 * z_size) - (z_size * (size.2 - 1) as f32 * 0.5),
+                    ),
+                    nalgebra::UnitQuaternion::identity(),
+                    1.0,
+                ));
             }
         }
     }
@@ -243,39 +249,80 @@ fn main() -> Result<(), failure::Error> {
 
     pbr_graph_builder.add_node(present_builder);
 
-    let mut material_storage = HashMap::new();
+    let mut world = specs::World::new();
+    world.register::<components::Transform>();
+    world.register::<components::Mesh>();
+    world.register::<components::Camera>();
+    world.register::<components::Light>();
 
-    let mut helmet: Option<scene::Object> = None;
-    {
+    let (material_storage, primitive_storage, mesh_storage) = {
         let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/gltf/helmet/");
         let file = File::open(base_path.join("SciFiHelmet.gltf"))?;
         let reader = std::io::BufReader::new(file);
         let gltf = gltf::Gltf::from_reader(reader)?;
 
         let gltf_buffers = asset::GltfBuffers::load_from_gltf(&base_path, &gltf)?;
+        let mut material_storage = asset::MaterialStorage(Vec::with_capacity(gltf.meshes().len()));
+        let mut primitive_storage = asset::PrimitiveStorage(Vec::new());
+        let mut mesh_storage = asset::MeshStorage(Vec::with_capacity(gltf.materials().len()));
 
         let scene = gltf.scenes().next().unwrap();
 
+        let instance_array_size = (1, 1, 1);
+
         for node in scene.nodes() {
-            match node.name() {
-                Some("SciFiHelmet") => {
-                    if let Some(mesh) = node.mesh() {
-                        helmet = Some(asset::object_from_gltf(
-                            &mesh,
-                            &base_path,
-                            &gltf_buffers,
-                            &mut material_storage,
-                            &mut factory,
-                            queue,
-                        )?);
+            if let Some(mesh) = node.mesh() {
+                use gltf::scene::Transform;
+                let node_transform = match node.transform() {
+                    Transform::Matrix { .. } => unimplemented!(),
+                    Transform::Decomposed {
+                        translation,
+                        rotation,
+                        scale,
+                    } => nalgebra::Similarity3::from_parts(
+                        nalgebra::Translation3::new(translation[0], translation[1], translation[2]),
+                        nalgebra::UnitQuaternion::from_quaternion(nalgebra::Quaternion::new(
+                            rotation[0],
+                            rotation[1],
+                            rotation[2],
+                            rotation[3],
+                        )),
+                        scale.iter().sum::<f32>() / 3.0,
+                    ),
+                };
+
+                let (transforms, max_instances) = match node.name() {
+                    Some("SciFiHelmet") => {
+                        let transforms = generate_instances(instance_array_size)
+                            .into_iter()
+                            .map(|t| node_transform * t)
+                            .collect::<Vec<_>>();
+                        (transforms, 1024)
                     }
-                }
-                _ => (),
+                    _ => (vec![node_transform], 1),
+                };
+
+                let mesh_handle = asset::load_gltf_mesh(
+                    &mesh,
+                    max_instances,
+                    &base_path,
+                    &gltf_buffers,
+                    &mut material_storage,
+                    &mut primitive_storage,
+                    &mut mesh_storage,
+                    &mut factory,
+                    queue,
+                )?;
             }
         }
-    }
+        (material_storage, primitive_storage, mesh_storage)
+    };
 
-    let camera = scene::Camera {
+    world.add_resource(material_storage);
+    world.add_resource(primitive_storage);
+    world.add_resource(mesh_storage);
+
+    let camera = components::Camera {
         yaw: 0.0,
         pitch: 0.0,
         dist: 10.0,
@@ -286,7 +333,9 @@ fn main() -> Result<(), failure::Error> {
             nalgebra::UnitQuaternion::identity(),
         ),
     };
-    let instance_array_size = (1, 1, 1);
+
+    world.create_entity().with(camera).build();
+
     let mut pbr_aux = node::pbr::Aux {
         frames,
         align,
