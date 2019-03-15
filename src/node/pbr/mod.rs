@@ -28,6 +28,6 @@ impl From<(components::Camera, components::Transform)> for CameraArgs {
 pub struct Aux {
     pub frames: usize,
     pub align: u64,
-    pub instance_array_size: (usize, usize, usize),
+    pub instance_array_size: (u8, u8, u8),
     pub tonemapper_args: tonemap::TonemapperArgs,
 }

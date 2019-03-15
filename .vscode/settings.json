@@ -1,6 +1,6 @@
 {
     "rust.features": [
-        "metal"
+        "vulkan"
     ],
     "editor.formatOnSave": true
 }
