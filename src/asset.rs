@@ -42,8 +42,12 @@ pub struct Primitive<B: hal::Backend> {
 pub struct PrimitiveStorage<B: hal::Backend>(pub Vec<Primitive<B>>);
 pub type PrimitiveHandle = usize;
 
-pub struct Mesh(Vec<PrimitiveHandle>);
-pub struct MeshStorage(Vec<Mesh>);
+pub struct Mesh {
+    pub primitives: Vec<PrimitiveHandle>,
+    pub max_insatnces: u16,
+}
+
+pub struct MeshStorage(pub Vec<Mesh>);
 pub type MeshHandle = usize;
 
 pub struct GltfBuffers(pub Vec<Vec<u8>>);
@@ -94,6 +98,7 @@ impl GltfBuffers {
 
 pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
     mesh: &gltf::Mesh<'_>,
+    max_insatnces: u16,
     base_dir: P,
     buffers: &GltfBuffers,
     material_storage: &mut MaterialStorage<B>,
@@ -225,7 +230,10 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
         primitives.push(primitive_storage.0.len() - 1);
     }
 
-    mesh_storage.0[mesh.index()] = Mesh(primitives);
+    mesh_storage.0[mesh.index()] = Mesh {
+        primitives,
+        max_insatnces,
+    };
 
     Ok(mesh.index() as MeshHandle)
 }

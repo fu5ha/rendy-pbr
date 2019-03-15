@@ -219,8 +219,7 @@ where
             )?
         };
 
-        let image_sampler = factory
-            .create_sampler(Filter::Nearest, WrapMode::Clamp)?;
+        let image_sampler = factory.create_sampler(Filter::Nearest, WrapMode::Clamp)?;
 
         let image_view = factory
             .create_image_view(
@@ -232,15 +231,14 @@ where
             )
             .expect("Could not create tonemapper input image view");
 
-        let buffer = factory
-            .create_buffer(
-                aux.align,
-                settings.buffer_frame_size() * aux.frames as u64,
-                (
-                    hal::buffer::Usage::UNIFORM,
-                    rendy::memory::MemoryUsageValue::Dynamic,
-                ),
-            )?;
+        let buffer = factory.create_buffer(
+            aux.align,
+            settings.buffer_frame_size() * aux.frames as u64,
+            (
+                hal::buffer::Usage::UNIFORM,
+                rendy::memory::MemoryUsageValue::Dynamic,
+            ),
+        )?;
 
         let mut sets = Vec::with_capacity(frames);
         for index in 0..frames {
@@ -311,7 +309,8 @@ where
                     &[UniformArgs {
                         tonemapper: aux.tonemapper_args,
                     }],
-                )?
+                )
+                .unwrap()
         };
         PrepareResult::DrawReuse
     }

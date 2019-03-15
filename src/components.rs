@@ -1,3 +1,5 @@
+use crate::asset;
+
 use specs::prelude::*;
 
 pub struct Transform(pub nalgebra::Similarity3<f32>);
@@ -12,24 +14,7 @@ pub struct Camera {
     pub pitch: f32,
     pub dist: f32,
     pub focus: nalgebra::Point3<f32>,
-    pub view: nalgebra::Isometry3<f32>,
     pub proj: nalgebra::Perspective3<f32>,
-}
-
-impl Camera {
-    pub fn update_view(&mut self) {
-        self.view = nalgebra::Isometry3::look_at_rh(
-            &(self.focus
-                + (self.dist
-                    * nalgebra::Vector3::new(
-                        self.yaw.sin() * self.pitch.cos(),
-                        self.pitch.sin(),
-                        self.yaw.cos() * self.pitch.cos(),
-                    ))),
-            &self.focus,
-            &nalgebra::Vector3::y(),
-        );
-    }
 }
 
 impl Component for Camera {
@@ -48,20 +33,24 @@ impl Component for Light {
     type Storage = DenseVecStorage<Self>;
 }
 
-pub struct Material {
-    pub mat: Entity,
-}
-
-impl Component for Material {
-    type Storage = DenseVecStorage<Self>;
-}
-
-pub struct Mesh {
-    pub mesh: Entity,
-}
+pub struct Mesh(pub asset::MeshHandle);
 
 impl Component for Mesh {
     type Storage = DenseVecStorage<Self>;
+}
+
+#[derive(Debug, Default)]
+pub struct ActiveCamera;
+
+impl Component for ActiveCamera {
+    type Storage = NullStorage<Self>;
+}
+
+#[derive(Debug, Default)]
+pub struct Helmet;
+
+impl Component for Helmet {
+    type Storage = NullStorage<Self>;
 }
 
 // pub struct Environment<B: hal::Backend> {
