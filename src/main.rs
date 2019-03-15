@@ -197,7 +197,7 @@ fn main() -> Result<(), failure::Error> {
     let surface = factory.create_surface(window.into());
     let aspect = surface.aspect();
 
-    let mut pbr_graph_builder = GraphBuilder::<Backend, node::pbr::Aux<Backend>>::new();
+    let mut pbr_graph_builder = GraphBuilder::<Backend, specs::World>::new();
 
     let hdr = pbr_graph_builder.create_image(
         surface.kind(),

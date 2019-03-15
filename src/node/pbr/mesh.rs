@@ -18,8 +18,8 @@ use std::{collections::HashMap, mem::size_of};
 use gfx_hal as hal;
 
 use crate::{
+    asset, components,
     node::pbr::{Aux, CameraArgs},
-    scene,
 };
 
 lazy_static::lazy_static! {
@@ -43,7 +43,7 @@ lazy_static::lazy_static! {
 pub struct UniformArgs {
     camera: CameraArgs,
     num_lights: i32,
-    lights: [scene::Light; scene::MAX_LIGHTS],
+    lights: [components::Light; crate::MAX_LIGHTS],
 }
 
 #[derive(Debug, Default)]
@@ -52,7 +52,8 @@ pub struct PipelineDesc;
 #[derive(Debug)]
 pub struct Pipeline<B: hal::Backend> {
     descriptor_pool: B::DescriptorPool,
-    buffer: Buffer<B>,
+    uniform_indirect_buffer: Buffer<B>,
+    transforms_buffer: Buffer<B>,
     texture_sampler: Sampler<B>,
     frame_sets: Vec<B::DescriptorSet>,
     mat_sets: HashMap<u64, B::DescriptorSet>,
@@ -62,30 +63,40 @@ pub struct Pipeline<B: hal::Backend> {
 #[derive(Debug, PartialEq, Eq)]
 struct Settings {
     align: u64,
-    max_obj_instances: Vec<usize>,
+    max_obj_instances: Vec<u16>,
     total_max_obj_instances: u64,
 }
 
-impl<B: hal::Backend> From<&Aux<B>> for Settings {
-    fn from(aux: &Aux<B>) -> Self {
-        Self::from_aux(aux)
+impl From<&specs::World> for Settings {
+    fn from(world: &specs::World) -> Self {
+        Self::from_world(world)
     }
 }
 
-impl<B: hal::Backend> From<&mut Aux<B>> for Settings {
-    fn from(aux: &mut Aux<B>) -> Self {
-        Self::from_aux(aux)
+impl From<&mut specs::World> for Settings {
+    fn from(world: &mut specs::World) -> Self {
+        Self::from_world(world)
     }
 }
 
 impl Settings {
     const UNIFORM_SIZE: u64 = size_of::<UniformArgs>() as u64;
 
-    fn from_aux<B: hal::Backend>(aux: &Aux<B>) -> Self {
+    fn from_world(world: &specs::World) -> Self {
+        let aux = world.read_resource::<Aux>();
+
+        let mesh_storage = world.read_resource::<asset::MeshStorage>();
+
+        let max_obj_instances = mesh_storage
+            .0
+            .iter()
+            .map(|mesh| mesh.max_instances)
+            .collect::<Vec<_>>();
+
         Settings {
             align: aux.align,
-            max_obj_instances: aux.scene.max_obj_instances.clone(),
-            total_max_obj_instances: aux.scene.max_obj_instances.iter().map(|n| *n as u64).sum(),
+            max_obj_instances,
+            total_max_obj_instances: max_obj_instances.iter().map(|n| *n as u64).sum(),
         }
     }
 
@@ -135,7 +146,7 @@ impl Settings {
     }
 }
 
-impl<B> SimpleGraphicsPipelineDesc<B, Aux<B>> for PipelineDesc
+impl<B> SimpleGraphicsPipelineDesc<B, specs::World> for PipelineDesc
 where
     B: hal::Backend,
 {

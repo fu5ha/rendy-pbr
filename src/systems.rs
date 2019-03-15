@@ -1,4 +1,4 @@
-use crate::{components, input, node};
+use crate::{asset, components, input, node};
 use hibitset::BitSetLike;
 use nalgebra::Similarity3;
 use specs::prelude::*;
@@ -54,7 +54,7 @@ impl<'a> System<'a> for InputSystem {
             match event {
                 winit::Event::DeviceEvent { event, .. } => {}
                 winit::Event::WindowEvent { event, .. } => {
-                    input.update_with_window_event(event);
+                    input.update_with_window_event(&event);
                 }
                 _ => (),
             }
@@ -62,21 +62,59 @@ impl<'a> System<'a> for InputSystem {
     }
 }
 
-pub struct PbrAuxInputSystem;
+pub struct PbrAuxInputSystem {
+    helmet_mesh: asset::MeshHandle,
+}
+
+fn try_add_instance_array_size_x(ia_size: (u8, u8, u8), max: u16) -> (u8, u8, u8) {
+    let mut n_ia_size = ia_size;
+    n_ia_size.0 = n_ia_size.0.checked_add(1).unwrap_or(u8::max_value());
+    if n_ia_size.0 as u16 * n_ia_size.1 as u16 * n_ia_size.2 as u16 <= max {
+        n_ia_size
+    } else {
+        ia_size
+    }
+}
+
+fn try_add_instance_array_size_y(ia_size: (u8, u8, u8), max: u16) -> (u8, u8, u8) {
+    let mut n_ia_size = ia_size;
+    n_ia_size.1 = n_ia_size.1.checked_add(1).unwrap_or(u8::max_value());
+    if n_ia_size.0 as u16 * n_ia_size.1 as u16 * n_ia_size.2 as u16 <= max {
+        n_ia_size
+    } else {
+        ia_size
+    }
+}
+
+fn try_add_instance_array_size_z(ia_size: (u8, u8, u8), max: u16) -> (u8, u8, u8) {
+    let mut n_ia_size = ia_size;
+    n_ia_size.2 = n_ia_size.2.checked_add(1).unwrap_or(u8::max_value());
+    if n_ia_size.0 as u16 * n_ia_size.1 as u16 * n_ia_size.2 as u16 <= max {
+        n_ia_size
+    } else {
+        ia_size
+    }
+}
 
 impl<'a> System<'a> for PbrAuxInputSystem {
     type SystemData = (
         Read<'a, input::EventBucket>,
         Read<'a, input::InputState>,
+        Read<'a, asset::MeshStorage>,
         Write<'a, node::pbr::Aux>,
     );
 
-    fn run((events, input, mut aux): Self::SystemData) {
+    fn run(&mut self, (events, input, mesh_storage, mut aux): Self::SystemData) {
+        use input::MouseState;
+        use winit::{ElementState, ModifiersState, VirtualKeyCode, WindowEvent};
+
+        let mesh = &mesh_storage.0[self.helmet_mesh];
+
         let mut input = (*input).clone();
         for &event in events.0.iter() {
             match event {
-                winit::event::WindowEvent { event, .. } => {
-                    input.update_with_window_event(event);
+                winit::Event::WindowEvent { event, .. } => {
+                    input.update_with_window_event(&event);
                     match event {
                         WindowEvent::CursorMoved { .. } | WindowEvent::MouseInput { .. } => {
                             if let (
@@ -87,10 +125,13 @@ impl<'a> System<'a> for PbrAuxInputSystem {
                                 ModifiersState { ctrl: true, .. },
                             ) = (input.mouse, input.modifiers)
                             {
-                                aux.tonemapper_args.comparison_factor = input.calc_comparison_factor();
+                                aux.tonemapper_args.comparison_factor =
+                                    input.calc_comparison_factor();
                             }
-                        },
-                        WindowEvent::KeyboardInput { input as key_input, .. } => {
+                        }
+                        WindowEvent::KeyboardInput {
+                            input: key_input, ..
+                        } => {
                             if let Some(kc) = key_input.virtual_keycode {
                                 match (kc, key_input.state, input.modifiers) {
                                     // Array size controls
@@ -101,7 +142,7 @@ impl<'a> System<'a> for PbrAuxInputSystem {
                                     ) => {
                                         aux.instance_array_size = try_add_instance_array_size_x(
                                             aux.instance_array_size,
-                                            aux.scene.max_obj_instances[0],
+                                            mesh.max_instances,
                                         );
                                     }
                                     (
@@ -109,7 +150,8 @@ impl<'a> System<'a> for PbrAuxInputSystem {
                                         ElementState::Pressed,
                                         ModifiersState { shift: true, .. },
                                     ) => {
-                                        aux.instance_array_size.0 = (aux.instance_array_size.0 - 1).max(1);
+                                        aux.instance_array_size.0 =
+                                            (aux.instance_array_size.0 - 1).max(1);
                                     }
                                     (
                                         VirtualKeyCode::Y,
@@ -118,7 +160,7 @@ impl<'a> System<'a> for PbrAuxInputSystem {
                                     ) => {
                                         aux.instance_array_size = try_add_instance_array_size_y(
                                             aux.instance_array_size,
-                                            aux.scene.max_obj_instances[0],
+                                            mesh.max_instances,
                                         );
                                     }
                                     (
@@ -126,7 +168,8 @@ impl<'a> System<'a> for PbrAuxInputSystem {
                                         ElementState::Pressed,
                                         ModifiersState { shift: true, .. },
                                     ) => {
-                                        aux.instance_array_size.1 = (aux.instance_array_size.1 - 1).max(1);
+                                        aux.instance_array_size.1 =
+                                            (aux.instance_array_size.1 - 1).max(1);
                                     }
                                     (
                                         VirtualKeyCode::Z,
@@ -135,7 +178,7 @@ impl<'a> System<'a> for PbrAuxInputSystem {
                                     ) => {
                                         aux.instance_array_size = try_add_instance_array_size_z(
                                             aux.instance_array_size,
-                                            aux.scene.max_obj_instances[0],
+                                            mesh.max_instances,
                                         );
                                     }
                                     (
@@ -143,7 +186,8 @@ impl<'a> System<'a> for PbrAuxInputSystem {
                                         ElementState::Pressed,
                                         ModifiersState { shift: true, .. },
                                     ) => {
-                                        aux.instance_array_size.2 = (aux.instance_array_size.2 - 1).max(1);
+                                        aux.instance_array_size.2 =
+                                            (aux.instance_array_size.2 - 1).max(1);
                                     }
                                     // Tonemapper controls
                                     (
@@ -151,31 +195,39 @@ impl<'a> System<'a> for PbrAuxInputSystem {
                                         ElementState::Pressed,
                                         ModifiersState { shift: false, .. },
                                     ) => {
-                                        aux.tonemapper_args.exposure += EXPOSURE_ADJUST_SENSITIVITY;
+                                        aux.tonemapper_args.exposure +=
+                                            input::EXPOSURE_ADJUST_SENSITIVITY;
                                     }
                                     (
                                         VirtualKeyCode::E,
                                         ElementState::Pressed,
                                         ModifiersState { shift: true, .. },
                                     ) => {
-                                        aux.tonemapper_args.exposure -= EXPOSURE_ADJUST_SENSITIVITY;
+                                        aux.tonemapper_args.exposure -=
+                                            input::EXPOSURE_ADJUST_SENSITIVITY;
                                     }
-                                    (VirtualKeyCode::A, ElementState::Pressed, ModifiersState { .. }) => {
-                                        aux.tonemapper_args.curve = 0
-                                    }
-                                    (VirtualKeyCode::U, ElementState::Pressed, ModifiersState { .. }) => {
-                                        aux.tonemapper_args.curve = 1
-                                    }
-                                    (VirtualKeyCode::C, ElementState::Pressed, ModifiersState { .. }) => {
-                                        aux.tonemapper_args.curve = 2
-                                    }
+                                    (
+                                        VirtualKeyCode::A,
+                                        ElementState::Pressed,
+                                        ModifiersState { .. },
+                                    ) => aux.tonemapper_args.curve = 0,
+                                    (
+                                        VirtualKeyCode::U,
+                                        ElementState::Pressed,
+                                        ModifiersState { .. },
+                                    ) => aux.tonemapper_args.curve = 1,
+                                    (
+                                        VirtualKeyCode::C,
+                                        ElementState::Pressed,
+                                        ModifiersState { .. },
+                                    ) => aux.tonemapper_args.curve = 2,
                                     _ => (),
                                 }
                             }
                         }
                         _ => (),
                     }
-                },
+                }
                 _ => (),
             }
         }
@@ -188,21 +240,29 @@ impl<'a> System<'a> for CameraInputSystem {
     type SystemData = (
         Read<'a, input::EventBucket>,
         Read<'a, input::InputState>,
-        Read<'a, components::ActiveCamera>,
-        Write<'a, components::Camera>,
+        ReadStorage<'a, components::Transform>,
+        ReadStorage<'a, components::ActiveCamera>,
+        WriteStorage<'a, components::Camera>,
     );
 
-    fn run((events, input, active_cameras, cameras): Self::SystemData) {
-        if let Some((_, &mut camera)) = (&active_cameras, &mut cameras).join().next() {
+    fn run((events, input, transforms, active_cameras, cameras): Self::SystemData) {
+        use input::{
+            MouseState, ROTATE_SENSITIVITY, TRANSLATE_SENSITIVITY, ZOOM_MOUSE_SENSITIVITY,
+            ZOOM_SCROLL_SENSITIVITY,
+        };
+        use winit::{DeviceEvent, ElementState, ModifiersState, MouseScrollDelta};
+        if let Some((_, &transform, &mut camera)) =
+            (&active_cameras, &transforms, &mut cameras).join().next()
+        {
             let mut input = (*input).clone();
             for &event in events.0.iter() {
                 match event {
                     winit::Event::WindowEvent { event, .. } => {
-                        input.update_with_window_event(event);
-                    },
-                    winit::Event::DeviceEvent { event, .. } => {
-                        match event {
-                            DeviceEvent::MouseMotion { delta } => match (input.mouse, input.modifiers) {
+                        input.update_with_window_event(&event);
+                    }
+                    winit::Event::DeviceEvent { event, .. } => match event {
+                        DeviceEvent::MouseMotion { delta } => {
+                            match (input.mouse, input.modifiers) {
                                 (
                                     MouseState {
                                         left: ElementState::Pressed,
@@ -224,11 +284,14 @@ impl<'a> System<'a> for CameraInputSystem {
                                     },
                                     ModifiersState { ctrl: false, .. },
                                 ) => {
-                                    let m_vec = nalgebra::Vector3::new(-delta.0 as f32, delta.1 as f32, 0.0)
-                                        * TRANSLATE_SENSITIVITY;
-                                    let rot = aux.scene.camera.view.rotation.inverse();
+                                    let m_vec = nalgebra::Vector3::new(
+                                        -delta.0 as f32,
+                                        delta.1 as f32,
+                                        0.0,
+                                    ) * TRANSLATE_SENSITIVITY;
+                                    let rot = transform.0.isometry.rotation;
                                     let m_vec = rot * m_vec;
-                                    camera.focus = aux.scene.camera.focus + m_vec;
+                                    camera.focus = camera.focus + m_vec;
                                 }
                                 (
                                     MouseState {
@@ -239,23 +302,24 @@ impl<'a> System<'a> for CameraInputSystem {
                                 ) => {
                                     let amount = -delta.0 as f32 * ZOOM_MOUSE_SENSITIVITY;
                                     camera.dist += amount;
-                                    camera.dist = aux.scene.camera.dist.max(0.0);
+                                    camera.dist = camera.dist.max(0.0);
                                 }
                                 _ => (),
-                            },
-                            DeviceEvent::MouseWheel { delta } => {
-                                let amount = match delta {
-                                    MouseScrollDelta::LineDelta(_, y) => -y as f32 * ZOOM_SCROLL_SENSITIVITY,
-                                    MouseScrollDelta::PixelDelta(delta) => {
-                                        -delta.y as f32 * ZOOM_SCROLL_SENSITIVITY * 0.05
-                                    }
-                                };
-                                aux.scene.camera.dist += amount;
-                                aux.scene.camera.dist = aux.scene.camera.dist.max(0.0);
-                                aux.scene.camera.update_view();
-                            },
-                            _ => (),
+                            }
                         }
+                        DeviceEvent::MouseWheel { delta } => {
+                            let amount = match delta {
+                                MouseScrollDelta::LineDelta(_, y) => {
+                                    -y as f32 * ZOOM_SCROLL_SENSITIVITY
+                                }
+                                MouseScrollDelta::PixelDelta(delta) => {
+                                    -delta.y as f32 * ZOOM_SCROLL_SENSITIVITY * 0.05
+                                }
+                            };
+                            camera.dist += amount;
+                            camera.dist = camera.dist.max(0.0);
+                        }
+                        _ => (),
                     },
                     _ => (),
                 }

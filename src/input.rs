@@ -9,7 +9,7 @@ use crate::node::pbr::Aux;
 
 pub struct EventBucket(pub Vec<winit::Event>);
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct MouseState {
     pub left: ElementState,
     pub right: ElementState,
@@ -23,45 +23,7 @@ pub const ZOOM_MOUSE_SENSITIVITY: f32 = 0.025;
 pub const ZOOM_SCROLL_SENSITIVITY: f32 = 1.0;
 pub const EXPOSURE_ADJUST_SENSITIVITY: f32 = 0.1;
 
-fn try_add_instance_array_size_x(
-    ia_size: (usize, usize, usize),
-    max: usize,
-) -> (usize, usize, usize) {
-    let mut n_ia_size = ia_size;
-    n_ia_size.0 += 1;
-    if n_ia_size.0 * n_ia_size.1 * n_ia_size.2 <= max {
-        n_ia_size
-    } else {
-        ia_size
-    }
-}
-
-fn try_add_instance_array_size_y(
-    ia_size: (usize, usize, usize),
-    max: usize,
-) -> (usize, usize, usize) {
-    let mut n_ia_size = ia_size;
-    n_ia_size.1 += 1;
-    if n_ia_size.0 * n_ia_size.1 * n_ia_size.2 <= max {
-        n_ia_size
-    } else {
-        ia_size
-    }
-}
-
-fn try_add_instance_array_size_z(
-    ia_size: (usize, usize, usize),
-    max: usize,
-) -> (usize, usize, usize) {
-    let mut n_ia_size = ia_size;
-    n_ia_size.2 += 1;
-    if n_ia_size.0 * n_ia_size.1 * n_ia_size.2 <= max {
-        n_ia_size
-    } else {
-        ia_size
-    }
-}
-
+#[derive(Debug, Clone, Copy)]
 pub struct InputState {
     pub mouse: MouseState,
     pub modifiers: ModifiersState,
@@ -87,46 +49,42 @@ impl InputState {
     }
 
     pub fn update_with_window_event(&mut self, event: &WindowEvent) {
-        winit::Event::WindowEvent { event, .. } => {
-            use winit::{MouseButton, WindowEvent};
-            match event {
-                WindowEvent::CursorMoved {
-                    position,
-                    modifiers,
-                    ..
-                } => {
-                    input.modifiers = modifiers;
-                    input.mouse.pos = position;
-                }
-                WindowEvent::MouseInput {
-                    state,
-                    button,
-                    modifiers,
-                    ..
-                } => {
-                    input.modifiers = modifiers;
-                    match button {
-                        MouseButton::Left => {
-                            input.mouse.left = state;
-                        }
-                        MouseButton::Right => {
-                            input.mouse.right = state;
-                        }
-                        MouseButton::Middle => {
-                            input.mouse.middle = state;
-                        }
-                        _ => (),
-                    }
-                }
-                WindowEvent::KeyboardInput {
-                    input: key_input, ..
-                } => {
-                    input.modifiers = key_input.modifiers;
-                }
-                _ => (),
+        use winit::{MouseButton, WindowEvent};
+        match *event {
+            WindowEvent::CursorMoved {
+                position,
+                modifiers,
+                ..
+            } => {
+                self.modifiers = modifiers;
+                self.mouse.pos = position;
             }
+            WindowEvent::MouseInput {
+                state,
+                button,
+                modifiers,
+                ..
+            } => {
+                self.modifiers = modifiers;
+                match button {
+                    MouseButton::Left => {
+                        self.mouse.left = state;
+                    }
+                    MouseButton::Right => {
+                        self.mouse.right = state;
+                    }
+                    MouseButton::Middle => {
+                        self.mouse.middle = state;
+                    }
+                    _ => (),
+                }
+            }
+            WindowEvent::KeyboardInput {
+                input: key_input, ..
+            } => {
+                self.modifiers = key_input.modifiers;
+            }
+            _ => (),
         }
-    }
-    pub fn handle_device_event<B: hal::Backend>(&mut self, event: &DeviceEvent, aux: &mut Aux<B>) {
     }
 }
