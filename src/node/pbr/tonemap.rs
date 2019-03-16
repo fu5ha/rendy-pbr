@@ -33,7 +33,7 @@ lazy_static::lazy_static! {
     );
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
 pub struct TonemapperArgs {
     pub exposure: f32,
@@ -58,14 +58,14 @@ struct Settings {
     align: u64,
 }
 
-impl<B: hal::Backend> From<&Aux<B>> for Settings {
-    fn from(aux: &Aux<B>) -> Self {
+impl From<&Aux> for Settings {
+    fn from(aux: &Aux) -> Self {
         Self::from_aux(aux)
     }
 }
 
-impl<B: hal::Backend> From<&mut Aux<B>> for Settings {
-    fn from(aux: &mut Aux<B>) -> Self {
+impl From<&mut Aux> for Settings {
+    fn from(aux: &mut Aux) -> Self {
         Self::from_aux(aux)
     }
 }
@@ -73,7 +73,7 @@ impl<B: hal::Backend> From<&mut Aux<B>> for Settings {
 impl Settings {
     const UNIFORM_SIZE: u64 = size_of::<UniformArgs>() as u64;
 
-    fn from_aux<B: hal::Backend>(aux: &Aux<B>) -> Self {
+    fn from_aux(aux: &Aux) -> Self {
         Settings { align: aux.align }
     }
 
@@ -101,7 +101,7 @@ pub struct Pipeline<B: gfx_hal::Backend> {
     settings: Settings,
 }
 
-impl<B> SimpleGraphicsPipelineDesc<B, Aux<B>> for PipelineDesc
+impl<B> SimpleGraphicsPipelineDesc<B, specs::World> for PipelineDesc
 where
     B: gfx_hal::Backend,
 {
@@ -124,7 +124,7 @@ where
         &self,
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
-        _aux: &mut Aux<B>,
+        _world: &mut specs::World,
     ) -> gfx_hal::pso::GraphicsShaderSet<'a, B> {
         storage.clear();
 
@@ -186,7 +186,7 @@ where
         self,
         factory: &mut Factory<B>,
         _queue: QueueId,
-        aux: &mut Aux<B>,
+        world: &mut specs::World,
         buffers: Vec<NodeBuffer<'a, B>>,
         images: Vec<NodeImage<'a, B>>,
         set_layouts: &[B::DescriptorSetLayout],
@@ -195,7 +195,9 @@ where
         assert!(images.len() == 1);
         assert!(set_layouts.len() == 1);
 
-        let settings: Settings = aux.into();
+        let aux = world.read_resource::<Aux>();
+
+        let settings: Settings = (&*aux).into();
 
         let frames = aux.frames;
 
@@ -287,7 +289,7 @@ where
     }
 }
 
-impl<B> SimpleGraphicsPipeline<B, Aux<B>> for Pipeline<B>
+impl<B> SimpleGraphicsPipeline<B, specs::World> for Pipeline<B>
 where
     B: gfx_hal::Backend,
 {
@@ -299,8 +301,9 @@ where
         _queue: QueueId,
         _set_layouts: &[B::DescriptorSetLayout],
         index: usize,
-        aux: &Aux<B>,
+        world: &specs::World,
     ) -> PrepareResult {
+        let aux = world.read_resource::<Aux>();
         unsafe {
             factory
                 .upload_visible_buffer(
@@ -320,7 +323,7 @@ where
         layout: &B::PipelineLayout,
         mut encoder: RenderPassEncoder<'_, B>,
         index: usize,
-        _aux: &Aux<B>,
+        _world: &specs::World,
     ) {
         encoder.bind_graphics_descriptor_sets(
             layout,
@@ -335,7 +338,7 @@ where
         encoder.draw(0..3, 0..1);
     }
 
-    fn dispose(mut self, factory: &mut Factory<B>, _aux: &mut Aux<B>) {
+    fn dispose(mut self, factory: &mut Factory<B>, _world: &mut specs::World) {
         unsafe {
             self.descriptor_pool.reset();
             factory.destroy_descriptor_pool(self.descriptor_pool);

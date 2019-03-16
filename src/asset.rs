@@ -31,22 +31,27 @@ pub struct MaterialData<B: hal::Backend> {
     pub ao: Texture<B>,
 }
 
+#[derive(Default)]
 pub struct MaterialStorage<B: hal::Backend>(pub Vec<MaterialData<B>>);
 pub type MaterialHandle = usize;
 
 pub struct Primitive<B: hal::Backend> {
-    pub mesh: rendy::mesh::Mesh<B>,
+    pub mesh_data: rendy::mesh::Mesh<B>,
+    pub mesh_handle: MeshHandle,
     pub mat: MaterialHandle,
 }
 
+#[derive(Default)]
 pub struct PrimitiveStorage<B: hal::Backend>(pub Vec<Primitive<B>>);
 pub type PrimitiveHandle = usize;
 
+#[derive(Default)]
 pub struct Mesh {
     pub primitives: Vec<PrimitiveHandle>,
     pub max_instances: u16,
 }
 
+#[derive(Default)]
 pub struct MeshStorage(pub Vec<Mesh>);
 pub type MeshHandle = usize;
 
@@ -223,7 +228,8 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
         }
 
         primitive_storage.0.push(Primitive {
-            mesh: prim_mesh,
+            mesh_data: prim_mesh,
+            mesh_handle: mesh.index(),
             mat: mat_idx as MaterialHandle,
         });
 

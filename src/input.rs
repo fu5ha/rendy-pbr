@@ -1,3 +1,4 @@
+use derivative::Derivative;
 use winit::{
     DeviceEvent, ElementState, ModifiersState, MouseButton, MouseScrollDelta, VirtualKeyCode,
     WindowEvent,
@@ -7,13 +8,19 @@ use gfx_hal as hal;
 
 use crate::node::pbr::Aux;
 
+#[derive(Default)]
 pub struct EventBucket(pub Vec<winit::Event>);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Derivative, Debug, Clone, Copy)]
+#[derivative(Default)]
 pub struct MouseState {
+    #[derivative(Default(value = "winit::ElementState::Released"))]
     pub left: ElementState,
+    #[derivative(Default(value = "winit::ElementState::Released"))]
     pub right: ElementState,
+    #[derivative(Default(value = "winit::ElementState::Released"))]
     pub middle: ElementState,
+    #[derivative(Default(value = "winit::dpi::LogicalPosition::new(0., 0.)"))]
     pub pos: winit::dpi::LogicalPosition,
 }
 
@@ -23,10 +30,12 @@ pub const ZOOM_MOUSE_SENSITIVITY: f32 = 0.025;
 pub const ZOOM_SCROLL_SENSITIVITY: f32 = 1.0;
 pub const EXPOSURE_ADJUST_SENSITIVITY: f32 = 0.1;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Derivative, Debug, Clone, Copy)]
+#[derivative(Default)]
 pub struct InputState {
     pub mouse: MouseState,
     pub modifiers: ModifiersState,
+    #[derivative(Default(value = "winit::dpi::LogicalSize::new(0., 0.)"))]
     pub window_size: winit::dpi::LogicalSize,
 }
 
