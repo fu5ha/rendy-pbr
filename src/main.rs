@@ -254,6 +254,7 @@ fn main() -> Result<(), failure::Error> {
     world.register::<components::Mesh>();
     world.register::<components::Camera>();
     world.register::<components::Light>();
+    world.register::<systems::MeshInstance>();
 
     let (material_storage, primitive_storage, mesh_storage) = {
         let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/gltf/helmet/");
@@ -328,18 +329,33 @@ fn main() -> Result<(), failure::Error> {
         dist: 10.0,
         focus: nalgebra::Point3::new(0.0, 0.0, 0.0),
         proj: nalgebra::Perspective3::new(aspect, 3.1415 / 6.0, 1.0, 200.0),
-        view: nalgebra::Isometry3::from_parts(
-            nalgebra::Translation3::new(0.0, 0.0, -10.0),
-            nalgebra::UnitQuaternion::identity(),
-        ),
     };
 
-    world.create_entity().with(camera).build();
+    world
+        .create_entity()
+        .with(camera)
+        .with(components::Transform(nalgebra::Similarity3::from_parts(
+            nalgebra::Translation3::new(0.0, 0.0, 10.0),
+            nalgebra::UnitQuaternion::identity(),
+            1.0,
+        )))
+        .build();
 
-    let mut pbr_aux = node::pbr::Aux {
+    let instance_array_size = (1, 1, 1);
+
+    let pbr_aux = node::pbr::Aux {
         frames,
         align,
         instance_array_size,
+        tonemapper_args: node::pbr::tonemap::TonemapperArgs {
+            exposure: 2.5,
+            curve: 0,
+            comparison_factor: 0.5,
+        },
+    };
+
+    world.add_resource(pbr_aux);
+    /*
         scene: scene::Scene {
             camera,
             max_obj_instances: vec![512],
@@ -384,14 +400,10 @@ fn main() -> Result<(), failure::Error> {
             ],
         },
         material_storage,
-        tonemapper_args: node::pbr::tonemap::TonemapperArgs {
-            exposure: 2.5,
-            curve: 0,
-            comparison_factor: 0.5,
-        },
     };
+    */
 
-    let mut pbr_graph = pbr_graph_builder.build(&mut factory, &mut families, &mut pbr_aux)?;
+    let mut pbr_graph = pbr_graph_builder.build(&mut factory, &mut families, &mut world)?;
 
     let started = time::Instant::now();
 

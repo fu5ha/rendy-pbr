@@ -20,6 +20,7 @@ use gfx_hal as hal;
 use crate::{
     asset, components,
     node::pbr::{Aux, CameraArgs},
+    systems,
 };
 
 lazy_static::lazy_static! {
@@ -43,7 +44,7 @@ lazy_static::lazy_static! {
 pub struct UniformArgs {
     camera: CameraArgs,
     num_lights: i32,
-    lights: [components::Light; crate::MAX_LIGHTS],
+    lights: [super::LightData; crate::MAX_LIGHTS],
 }
 
 #[derive(Debug, Default)]
@@ -53,18 +54,19 @@ pub struct PipelineDesc;
 pub struct Pipeline<B: hal::Backend> {
     descriptor_pool: B::DescriptorPool,
     uniform_indirect_buffer: Buffer<B>,
-    transforms_buffer: Buffer<B>,
+    transform_buffer: Buffer<B>,
     texture_sampler: Sampler<B>,
     frame_sets: Vec<B::DescriptorSet>,
-    mat_sets: HashMap<u64, B::DescriptorSet>,
+    mat_sets: Vec<B::DescriptorSet>,
     settings: Settings,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 struct Settings {
     align: u64,
-    max_obj_instances: Vec<u16>,
-    total_max_obj_instances: u64,
+    num_primitives: usize,
+    max_mesh_instances: Vec<u16>,
+    total_max_mesh_instances: u64,
 }
 
 impl From<&specs::World> for Settings {
@@ -82,12 +84,13 @@ impl From<&mut specs::World> for Settings {
 impl Settings {
     const UNIFORM_SIZE: u64 = size_of::<UniformArgs>() as u64;
 
-    fn from_world(world: &specs::World) -> Self {
+    fn from_world<B: hal::Backend>(world: &specs::World) -> Self {
         let aux = world.read_resource::<Aux>();
 
         let mesh_storage = world.read_resource::<asset::MeshStorage>();
+        let primitive_storage = world.read_resource::<asset::PrimitiveStorage<B>>();
 
-        let max_obj_instances = mesh_storage
+        let max_mesh_instances = mesh_storage
             .0
             .iter()
             .map(|mesh| mesh.max_instances)
@@ -95,45 +98,50 @@ impl Settings {
 
         Settings {
             align: aux.align,
-            max_obj_instances,
-            total_max_obj_instances: max_obj_instances.iter().map(|n| *n as u64).sum(),
+            num_primitives: primitive_storage.0.len(),
+            max_mesh_instances,
+            total_max_mesh_instances: max_mesh_instances.iter().map(|n| *n as u64).sum(),
         }
     }
 
     #[inline]
     fn transform_size(&self) -> u64 {
-        size_of::<Transform>() as u64 * self.total_max_obj_instances
+        size_of::<Transform>() as u64 * self.total_max_mesh_instances
     }
 
     #[inline]
     fn indirect_size(&self) -> u64 {
-        size_of::<DrawIndexedCommand>() as u64 * self.max_obj_instances.len() as u64
+        size_of::<DrawIndexedCommand>() as u64 * self.num_primitives as u64
     }
 
     #[inline]
-    fn buffer_frame_size(&self) -> u64 {
-        ((Self::UNIFORM_SIZE + self.transform_size() + self.indirect_size() - 1) / self.align + 1)
-            * self.align
+    fn uniform_indirect_buffer_frame_size(&self) -> u64 {
+        ((Self::UNIFORM_SIZE + self.indirect_size() - 1) / self.align + 1) * self.align
+    }
+
+    #[inline]
+    fn transform_buffer_frame_size(&self) -> u64 {
+        ((self.transform_size() - 1) / self.align + 1) * self.align
     }
 
     #[inline]
     fn uniform_offset(&self, index: u64) -> u64 {
-        self.buffer_frame_size() * index as u64
+        self.uniform_indirect_buffer_frame_size() * index as u64
     }
 
     #[inline]
     fn transforms_offset(&self, index: u64) -> u64 {
-        self.uniform_offset(index) + Self::UNIFORM_SIZE
+        self.transform_buffer_frame_size() * index as u64
     }
 
     #[inline]
     fn indirect_offset(&self, index: u64) -> u64 {
-        self.transforms_offset(index) + self.transform_size()
+        self.uniform_offset(index) + Self::UNIFORM_SIZE
     }
 
     #[inline]
-    fn obj_transforms_offset(&self, obj_index: usize) -> u64 {
-        self.max_obj_instances[0..obj_index]
+    fn mesh_transforms_offset(&self, mesh_index: usize) -> u64 {
+        self.max_mesh_instances[0..mesh_index]
             .iter()
             .map(|n| *n as u64)
             .sum::<u64>()
@@ -141,8 +149,13 @@ impl Settings {
     }
 
     #[inline]
-    fn obj_indirect_offset(&self, obj_index: usize) -> u64 {
-        obj_index as u64 * size_of::<DrawIndexedCommand>() as u64
+    fn instance_transform_offset(&self, mesh_index: usize, instance: u16) -> u64 {
+        self.mesh_transforms_offset(mesh_index) + size_of::<Transform>() as u64 * instance as u64
+    }
+
+    #[inline]
+    fn primitive_indirect_offset(&self, prim_index: usize) -> u64 {
+        prim_index as u64 * size_of::<DrawIndexedCommand>() as u64
     }
 }
 
@@ -207,7 +220,7 @@ where
         &self,
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
-        _aux: &mut Aux<B>,
+        _aux: &mut specs::World,
     ) -> hal::pso::GraphicsShaderSet<'a, B> {
         storage.clear();
 
@@ -238,7 +251,7 @@ where
         self,
         factory: &mut Factory<B>,
         _queue: QueueId,
-        aux: &mut Aux<B>,
+        world: &mut specs::World,
         buffers: Vec<NodeBuffer<'a, B>>,
         images: Vec<NodeImage<'a, B>>,
         set_layouts: &[B::DescriptorSetLayout],
@@ -247,9 +260,11 @@ where
         assert!(images.is_empty());
         assert_eq!(set_layouts.len(), 2);
 
+        let aux = world.read_resource::<Aux>();
         let frames = aux.frames;
+        let material_storage = world.read_resource::<asset::MaterialStorage<B>>();
 
-        let num_mats = aux.material_storage.len();
+        let num_mats = material_storage.0.len();
         let mut descriptor_pool = unsafe {
             factory.create_descriptor_pool(
                 frames + num_mats,
@@ -270,17 +285,20 @@ where
             )?
         };
 
-        let settings = Settings::from_aux(aux);
+        let settings = Settings::from_world(world);
 
-        let buffer = factory.create_buffer(
+        let uniform_indirect_buffer = factory.create_buffer(
             aux.align,
-            settings.buffer_frame_size() * frames as u64,
+            settings.uniform_indirect_buffer_frame_size() * frames as u64,
             (
-                hal::buffer::Usage::UNIFORM
-                    | hal::buffer::Usage::INDIRECT
-                    | hal::buffer::Usage::VERTEX,
+                hal::buffer::Usage::UNIFORM | hal::buffer::Usage::INDIRECT,
                 MemoryUsageValue::Dynamic,
             ),
+        )?;
+        let transform_buffer = factory.create_buffer(
+            aux.align,
+            settings.transform_buffer_frame_size() * frames as u64,
+            (hal::buffer::Usage::VERTEX, MemoryUsageValue::Dynamic),
         )?;
 
         let texture_sampler = factory.create_sampler(Filter::Linear, WrapMode::Clamp)?;
@@ -295,7 +313,7 @@ where
                         binding: 0,
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Buffer(
-                            buffer.raw(),
+                            uniform_indirect_buffer.raw(),
                             Some(settings.uniform_offset(index as u64))
                                 ..Some(
                                     settings.uniform_offset(index as u64) + Settings::UNIFORM_SIZE,
@@ -313,9 +331,9 @@ where
             }
         }
 
-        let mut mat_sets = HashMap::new();
+        let mut mat_sets = Vec::new();
 
-        for (mat_hash, material) in aux.material_storage.iter() {
+        for mat_data in material_storage.0.iter() {
             unsafe {
                 let set = descriptor_pool.allocate_set(&set_layouts[1])?;
                 factory.write_descriptor_sets(vec![
@@ -324,7 +342,7 @@ where
                         binding: 0,
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Image(
-                            material.albedo.image_view.raw(),
+                            mat_data.albedo.image_view.raw(),
                             hal::image::Layout::ShaderReadOnlyOptimal,
                         )),
                     },
@@ -333,7 +351,7 @@ where
                         binding: 1,
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Image(
-                            material.normal.image_view.raw(),
+                            mat_data.normal.image_view.raw(),
                             hal::image::Layout::ShaderReadOnlyOptimal,
                         )),
                     },
@@ -342,7 +360,7 @@ where
                         binding: 2,
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Image(
-                            material.metallic_roughness.image_view.raw(),
+                            mat_data.metallic_roughness.image_view.raw(),
                             hal::image::Layout::ShaderReadOnlyOptimal,
                         )),
                     },
@@ -351,18 +369,19 @@ where
                         binding: 3,
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Image(
-                            material.ao.image_view.raw(),
+                            mat_data.ao.image_view.raw(),
                             hal::image::Layout::ShaderReadOnlyOptimal,
                         )),
                     },
                 ]);
-                mat_sets.insert(*mat_hash, set);
+                mat_sets.push(set);
             }
         }
 
         Ok(Pipeline {
             descriptor_pool,
-            buffer,
+            uniform_indirect_buffer,
+            transform_buffer,
             texture_sampler,
             frame_sets,
             mat_sets,
@@ -371,7 +390,7 @@ where
     }
 }
 
-impl<B> SimpleGraphicsPipeline<B, Aux<B>> for Pipeline<B>
+impl<B> SimpleGraphicsPipeline<B, specs::World> for Pipeline<B>
 where
     B: hal::Backend,
 {
@@ -383,71 +402,119 @@ where
         _queue: QueueId,
         _set_layouts: &[B::DescriptorSetLayout],
         index: usize,
-        aux: &Aux<B>,
+        world: &specs::World,
     ) -> PrepareResult {
-        debug_assert!(aux.scene.lights.len() <= scene::MAX_LIGHTS);
-        if self.settings != aux.into() {
+        if self.settings != world.into() {
             unimplemented!();
         }
 
-        let mut lights = [aux.scene.lights[0]; scene::MAX_LIGHTS];
-        for (i, l) in aux.scene.lights.iter().enumerate() {
-            lights[i] = *l;
+        use rendy::memory::Write;
+        use specs::prelude::*;
+
+        let aux = world.read_resource::<Aux>();
+        let lights = world.read_storage::<components::Light>();
+        let transforms = world.read_storage::<components::Transform>();
+
+        let mut n_lights = 0;
+        let mut lights_data = [Default::default(); crate::MAX_LIGHTS];
+        for (&light, &transform) in (&lights, &transforms).join() {
+            if n_lights >= crate::MAX_LIGHTS {
+                break;
+            }
+
+            lights_data[n_lights] = super::LightData {
+                pos: transform.0 * nalgebra::Point3::<f32>::origin(),
+                color: light.color,
+                intensity: light.intensity,
+                _pad: 0f32,
+            };
+
+            n_lights += 1;
         }
-        let camera_args: CameraArgs = aux.scene.camera.into();
+        let cameras = world.read_storage::<components::Camera>();
+        let active_cameras = world.read_storage::<components::ActiveCamera>();
+        let camera_args: CameraArgs = (&active_cameras, &cameras, &transforms)
+            .join()
+            .map(|(_, cam, trans)| (cam, trans).into())
+            .next()
+            .unwrap();
         unsafe {
             factory
                 .upload_visible_buffer(
-                    &mut self.buffer,
+                    &mut self.uniform_indirect_buffer,
                     self.settings.uniform_offset(index as u64),
                     &[UniformArgs {
                         camera: camera_args,
-                        num_lights: aux.scene.lights.len() as i32,
-                        lights,
+                        num_lights: n_lights as i32,
+                        lights: lights_data,
                     }],
                 )
                 .unwrap()
         };
 
-        let cmds = aux
-            .scene
-            .objects
-            .iter()
-            .map(|(o, instances)| DrawIndexedCommand {
-                index_count: o.mesh.len(),
-                instance_count: instances.len() as u32,
-                first_index: 0,
-                vertex_offset: 0,
-                first_instance: 0,
-            })
-            .collect::<Vec<_>>();
+        let instance_cache = world.read_resource::<systems::InstanceCache>();
+        let mesh_storage = world.read_resource::<asset::MeshStorage>();
+        let primitive_storage = world.read_resource::<asset::PrimitiveStorage<B>>();
 
-        unsafe {
-            factory
-                .upload_visible_buffer(
-                    &mut self.buffer,
-                    self.settings.indirect_offset(index as u64),
-                    &cmds,
-                )
-                .unwrap()
-        };
+        let indirect_offset = self.settings.indirect_offset(index as u64);
+        let indirect_end = indirect_offset + self.settings.indirect_size();
+        {
+            let indirects_mapped = self
+                .uniform_indirect_buffer
+                .map(factory.device(), indirect_offset..indirect_end)
+                .unwrap();
 
-        let transforms_offset = self.settings.transforms_offset(index as u64);
-        aux.scene
-            .objects
-            .iter()
-            .enumerate()
-            .for_each(|(i, (_obj, instances))| {
-                unsafe {
-                    factory
-                        .upload_visible_buffer(
-                            &mut self.buffer,
-                            transforms_offset + self.settings.obj_transforms_offset(i),
-                            &instances[..],
+            for dirty_mesh in instance_cache.dirty_mesh_indirects {
+                for prim_index in mesh_storage.0[dirty_mesh].primitives {
+                    let start = self.settings.primitive_indirect_offset(prim_index);
+                    indirects_mapped
+                        .write(
+                            factory.device(),
+                            start..(start + size_of::<DrawIndexedCommand>() as u64),
                         )
                         .unwrap()
-                };
-            });
+                        .write(&[DrawIndexedCommand {
+                            index_count: primitive_storage.0[prim_index].mesh_data.len(),
+                            instance_count: instance_cache.counts[dirty_mesh],
+                            first_index: 0,
+                            vertex_offset: 0,
+                            first_instance: 0,
+                        }]);
+                }
+            }
+        }
+
+        let mesh_instance_storage = world.read_storage::<systems::MeshInstance>();
+        let mesh_component_storage = world.read_storage::<components::Mesh>();
+
+        let transforms_offset = self.settings.transforms_offset(index as u64);
+        let transforms_end = transforms_offset + self.settings.transform_size();
+        {
+            let transforms_mapped = self
+                .transform_buffer
+                .map(factory.device(), transforms_offset..transforms_end)
+                .unwrap();
+
+            for (mesh, mesh_instance, &transform, _) in (
+                &mesh_component_storage,
+                &mesh_instance_storage,
+                &transforms,
+                &instance_cache.dirty_entities,
+            )
+                .join()
+            {
+                let start = self
+                    .settings
+                    .instance_transform_offset(mesh.0, mesh_instance.0);
+                transforms_mapped
+                    .write(
+                        factory.device(),
+                        start..(start + size_of::<Transform>() as u64),
+                    )
+                    .unwrap()
+                    .write(&[transform.0.to_homogeneous()]);
+            }
+        }
 
         PrepareResult::DrawReuse
     }
@@ -457,8 +524,9 @@ where
         layout: &B::PipelineLayout,
         mut encoder: RenderPassEncoder<'_, B>,
         index: usize,
-        aux: &Aux<B>,
+        world: &specs::World,
     ) {
+        let primitive_storage = world.read_resource::<asset::PrimitiveStorage<B>>();
         encoder.bind_graphics_descriptor_sets(
             layout,
             0,
@@ -467,36 +535,37 @@ where
         );
         let transforms_offset = self.settings.transforms_offset(index as u64);
         let indirect_offset = self.settings.indirect_offset(index as u64);
-        for (mat_hash, set) in self.mat_sets.iter() {
+        for (mat_idx, set) in self.mat_sets.iter().enumerate() {
             encoder.bind_graphics_descriptor_sets(layout, 1, Some(set), std::iter::empty());
-            aux.scene
-                .objects
+            for (prim_idx, primitive) in primitive_storage
+                .0
                 .iter()
                 .enumerate()
-                .filter(|(_, (o, _))| o.material == *mat_hash)
-                .for_each(|(i, (obj, _instances))| {
-                    assert!(obj
-                        .mesh
-                        .bind(&[PosNormTangTex::VERTEX], &mut encoder)
-                        .is_ok());
-                    encoder.bind_vertex_buffers(
-                        1,
-                        std::iter::once((
-                            self.buffer.raw(),
-                            transforms_offset + self.settings.obj_transforms_offset(i),
-                        )),
-                    );
-                    encoder.draw_indexed_indirect(
-                        self.buffer.raw(),
-                        indirect_offset + self.settings.obj_indirect_offset(i),
-                        1,
-                        size_of::<DrawIndexedCommand> as u32,
-                    );
-                })
+                .filter(|(_, primitive)| primitive.mat == mat_idx)
+            {
+                assert!(primitive
+                    .mesh_data
+                    .bind(&[PosNormTangTex::VERTEX], &mut encoder)
+                    .is_ok());
+                encoder.bind_vertex_buffers(
+                    1,
+                    std::iter::once((
+                        self.transform_buffer.raw(),
+                        transforms_offset
+                            + self.settings.mesh_transforms_offset(primitive.mesh_handle),
+                    )),
+                );
+                encoder.draw_indexed_indirect(
+                    self.uniform_indirect_buffer.raw(),
+                    indirect_offset + self.settings.primitive_indirect_offset(prim_idx),
+                    1,
+                    size_of::<DrawIndexedCommand>() as u32,
+                );
+            }
         }
     }
 
-    fn dispose(mut self, factory: &mut Factory<B>, _aux: &mut Aux<B>) {
+    fn dispose(mut self, factory: &mut Factory<B>, _world: &mut specs::World) {
         unsafe {
             self.descriptor_pool.reset();
             factory.destroy_descriptor_pool(self.descriptor_pool);

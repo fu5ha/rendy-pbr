@@ -23,20 +23,18 @@ impl Component for Camera {
 
 #[derive(Clone, Copy)]
 pub struct Light {
-    pub pos: nalgebra::Vector3<f32>,
     pub intensity: f32,
     pub color: [f32; 3],
-    pub _pad: f32,
 }
 
 impl Component for Light {
-    type Storage = DenseVecStorage<Self>;
+    type Storage = FlaggedStorage<Self, DenseVecStorage<Self>>;
 }
 
 pub struct Mesh(pub asset::MeshHandle);
 
 impl Component for Mesh {
-    type Storage = DenseVecStorage<Self>;
+    type Storage = FlaggedStorage<Self, DenseVecStorage<Self>>;
 }
 
 #[derive(Debug, Default)]
