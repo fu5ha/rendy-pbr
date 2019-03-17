@@ -11,9 +11,9 @@ use rendy::{
     resource::image::TextureUsage,
 };
 
-use std::{collections::HashMap, fs::File, path::Path, time};
+use std::{fs::File, path::Path, time};
 
-use gfx_hal as hal;
+use rendy::hal;
 
 use specs::prelude::*;
 
@@ -40,11 +40,11 @@ pub type Backend = rendy::vulkan::Backend;
 #[cfg(feature = "empty")]
 pub type Backend = rendy::empty::Backend;
 
-pub fn generate_instances(size: (usize, usize, usize)) -> Vec<nalgebra::Similarity3<f32>> {
+pub fn generate_instances(size: (u8, u8, u8)) -> Vec<nalgebra::Similarity3<f32>> {
     let x_size = 3.0;
     let y_size = 4.0;
     let z_size = 4.0;
-    let mut instances = Vec::with_capacity(size.0 * size.1 * size.2);
+    let mut instances = Vec::with_capacity(size.0 as usize * size.1 as usize * size.2 as usize);
     for x in 0..size.0 {
         for y in 0..size.1 {
             for z in 0..size.2 {
@@ -91,96 +91,96 @@ fn main() -> Result<(), failure::Error> {
         .as_slice()[0]
         .id();
 
-    // Preprocess steps to load environment map, convert it to a cubemap,
-    // and filter it for use later
-    let mut env_preprocess_graph_builder =
-        GraphBuilder::<Backend, node::env_preprocess::Aux<Backend>>::new();
+    // // Preprocess steps to load environment map, convert it to a cubemap,
+    // // and filter it for use later
+    // let mut env_preprocess_graph_builder =
+    //     GraphBuilder::<Backend, node::env_preprocess::Aux<Backend>>::new();
 
-    let mut equirect_to_faces =
-        node::env_preprocess::equirectangular_to_cube_faces::Pipeline::<Backend>::builder()
-            .into_subpass();
+    // let mut equirect_to_faces =
+    //     node::env_preprocess::equirectangular_to_cube_faces::Pipeline::<Backend>::builder()
+    //         .into_subpass();
 
-    let cube_face_images = hal::image::CUBE_FACES
-        .into_iter()
-        .map(|_| {
-            env_preprocess_graph_builder.create_image(
-                hal::image::Kind::D2(CUBEMAP_RES, CUBEMAP_RES, 1, 1),
-                1,
-                hal::format::Format::Rgba32Float,
-                MemoryUsageValue::Data,
-                Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
-            )
-        })
-        .collect::<Vec<_>>();
+    // let cube_face_images = hal::image::CUBE_FACES
+    //     .into_iter()
+    //     .map(|_| {
+    //         env_preprocess_graph_builder.create_image(
+    //             hal::image::Kind::D2(CUBEMAP_RES, CUBEMAP_RES, 1, 1),
+    //             1,
+    //             hal::format::Format::Rgba32Float,
+    //             MemoryUsageValue::Data,
+    //             Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
+    //         )
+    //     })
+    //     .collect::<Vec<_>>();
 
-    for image in cube_face_images.iter().cloned() {
-        equirect_to_faces.add_color(image);
-    }
+    // for image in cube_face_images.iter().cloned() {
+    //     equirect_to_faces.add_color(image);
+    // }
 
-    let equirect_to_faces_pass =
-        env_preprocess_graph_builder.add_node(equirect_to_faces.into_pass());
+    // let equirect_to_faces_pass =
+    //     env_preprocess_graph_builder.add_node(equirect_to_faces.into_pass());
 
-    let _faces_to_cubemap_pass = env_preprocess_graph_builder.add_node(
-        node::env_preprocess::faces_to_cubemap::FacesToCubemap::<Backend>::builder(
-            cube_face_images,
-        )
-        .with_dependency(equirect_to_faces_pass),
-    );
+    // let _faces_to_cubemap_pass = env_preprocess_graph_builder.add_node(
+    //     node::env_preprocess::faces_to_cubemap::FacesToCubemap::<Backend>::builder(
+    //         cube_face_images,
+    //     )
+    //     .with_dependency(equirect_to_faces_pass),
+    // );
 
-    let equirect_file = std::fs::File::open(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/assets/environment/abandoned_hall_01_4k.hdr"
-    ))?;
+    // let equirect_file = std::fs::File::open(concat!(
+    //     env!("CARGO_MANIFEST_DIR"),
+    //     "/assets/environment/abandoned_hall_01_4k.hdr"
+    // ))?;
 
-    let equirect_tex = rendy::texture::image::load_from_image(
-        std::io::BufReader::new(equirect_file),
-        Default::default(),
-        TextureUsage,
-        factory.physical(),
-    )?
-    .build(
-        ImageState {
-            queue,
-            stage: hal::pso::PipelineStage::FRAGMENT_SHADER,
-            access: hal::image::Access::SHADER_READ,
-            layout: hal::image::Layout::ShaderReadOnlyOptimal,
-        },
-        &mut factory,
-        TextureUsage,
-    )?;
+    // let equirect_tex = rendy::texture::image::load_from_image(
+    //     std::io::BufReader::new(equirect_file),
+    //     Default::default(),
+    //     TextureUsage,
+    //     factory.physical(),
+    // )?
+    // .build(
+    //     ImageState {
+    //         queue,
+    //         stage: hal::pso::PipelineStage::FRAGMENT_SHADER,
+    //         access: hal::image::Access::SHADER_READ,
+    //         layout: hal::image::Layout::ShaderReadOnlyOptimal,
+    //     },
+    //     &mut factory,
+    //     TextureUsage,
+    // )?;
 
-    let cubemap_tex = rendy::texture::TextureBuilder::new()
-        .with_kind(rendy::resource::image::Kind::D2(
-            CUBEMAP_RES,
-            CUBEMAP_RES,
-            6,
-            1,
-        ))
-        .with_view_kind(rendy::resource::image::ViewKind::Cube)
-        .with_raw_format(hal::format::Format::Rgba32Float)
-        .build(
-            ImageState {
-                queue,
-                stage: hal::pso::PipelineStage::TRANSFER,
-                access: hal::image::Access::TRANSFER_WRITE,
-                layout: hal::image::Layout::TransferDstOptimal,
-            },
-            &mut factory,
-            TextureUsage,
-        )?;
+    // let cubemap_tex = rendy::texture::TextureBuilder::new()
+    //     .with_kind(rendy::resource::image::Kind::D2(
+    //         CUBEMAP_RES,
+    //         CUBEMAP_RES,
+    //         6,
+    //         1,
+    //     ))
+    //     .with_view_kind(rendy::resource::image::ViewKind::Cube)
+    //     .with_raw_format(hal::format::Format::Rgba32Float)
+    //     .build(
+    //         ImageState {
+    //             queue,
+    //             stage: hal::pso::PipelineStage::TRANSFER,
+    //             access: hal::image::Access::TRANSFER_WRITE,
+    //             layout: hal::image::Layout::TransferDstOptimal,
+    //         },
+    //         &mut factory,
+    //         TextureUsage,
+    //     )?;
 
-    let mut env_preprocess_aux = node::env_preprocess::Aux {
-        align,
-        equirectangular_texture: equirect_tex,
-        environment_cubemap: cubemap_tex,
-    };
+    // let mut env_preprocess_aux = node::env_preprocess::Aux {
+    //     align,
+    //     equirectangular_texture: equirect_tex,
+    //     environment_cubemap: cubemap_tex,
+    // };
 
-    let mut env_preprocess_graph =
-        env_preprocess_graph_builder.build(&mut factory, &mut families, &mut env_preprocess_aux)?;
+    // let mut env_preprocess_graph =
+    //     env_preprocess_graph_builder.build(&mut factory, &mut families, &mut env_preprocess_aux)?;
 
-    factory.maintain(&mut families);
-    env_preprocess_graph.run(&mut factory, &mut families, &mut env_preprocess_aux);
-    env_preprocess_graph.dispose(&mut factory, &mut env_preprocess_aux);
+    // factory.maintain(&mut families);
+    // env_preprocess_graph.run(&mut factory, &mut families, &mut env_preprocess_aux);
+    // env_preprocess_graph.dispose(&mut factory, &mut env_preprocess_aux);
 
     // Main window and render graph building
     let mut event_loop = EventsLoop::new();
@@ -190,7 +190,7 @@ fn main() -> Result<(), failure::Error> {
         .with_dimensions(winit::dpi::LogicalSize::new(1280.0, 960.0))
         .build(&event_loop)?;
 
-    let mut input = input::InputState::new(window.get_inner_size().unwrap());
+    let input = input::InputState::new(window.get_inner_size().unwrap());
 
     event_loop.poll_events(|_| ());
 
@@ -255,6 +255,9 @@ fn main() -> Result<(), failure::Error> {
     world.register::<components::Camera>();
     world.register::<components::Light>();
     world.register::<systems::MeshInstance>();
+    world.add_resource(input);
+
+    let instance_array_size = (1, 1, 1);
 
     let (material_storage, primitive_storage, mesh_storage) = {
         let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/gltf/helmet/");
@@ -263,13 +266,17 @@ fn main() -> Result<(), failure::Error> {
         let gltf = gltf::Gltf::from_reader(reader)?;
 
         let gltf_buffers = asset::GltfBuffers::load_from_gltf(&base_path, &gltf)?;
-        let mut material_storage = asset::MaterialStorage(Vec::with_capacity(gltf.meshes().len()));
-        let mut primitive_storage = asset::PrimitiveStorage(Vec::new());
-        let mut mesh_storage = asset::MeshStorage(Vec::with_capacity(gltf.materials().len()));
+        let mut material_storage = Vec::with_capacity(gltf.meshes().len());
+        for _ in 0..gltf.meshes().len() {
+            material_storage.push(None);
+        }
+        let mut primitive_storage = Vec::new();
+        let mut mesh_storage = Vec::with_capacity(gltf.materials().len());
+        for _ in 0..gltf.materials().len() {
+            mesh_storage.push(None);
+        }
 
         let scene = gltf.scenes().next().unwrap();
-
-        let instance_array_size = (1, 1, 1);
 
         for node in scene.nodes() {
             if let Some(mesh) = node.mesh() {
@@ -314,14 +321,62 @@ fn main() -> Result<(), failure::Error> {
                     &mut factory,
                     queue,
                 )?;
+
+                for transform in transforms {
+                    world
+                        .create_entity()
+                        .with(components::Mesh(mesh_handle))
+                        .with(components::Transform(transform))
+                        .build();
+                }
             }
         }
+        let material_storage = asset::MaterialStorage(
+            material_storage
+                .into_iter()
+                .map(|mut m| m.take().unwrap())
+                .collect::<Vec<_>>(),
+        );
+        let primitive_storage = asset::PrimitiveStorage(
+            primitive_storage
+                .into_iter()
+                .map(|mut p| p.take().unwrap())
+                .collect::<Vec<_>>(),
+        );
+        let mesh_storage = asset::MeshStorage(
+            mesh_storage
+                .into_iter()
+                .map(|mut m| m.take().unwrap())
+                .collect::<Vec<_>>(),
+        );
         (material_storage, primitive_storage, mesh_storage)
     };
 
+    let num_meshes = mesh_storage.0.len();
+    let num_materials = material_storage.0.len();
     world.add_resource(material_storage);
     world.add_resource(primitive_storage);
     world.add_resource(mesh_storage);
+
+    let pbr_aux = node::pbr::Aux {
+        frames,
+        align,
+        instance_array_size,
+        tonemapper_args: node::pbr::tonemap::TonemapperArgs {
+            exposure: 2.5,
+            curve: 0,
+            comparison_factor: 0.5,
+        },
+    };
+
+    world.add_resource(pbr_aux);
+
+    world.add_resource(systems::InstanceCache {
+        dirty_entities: specs::BitSet::new(),
+        dirty_mesh_indirects: Vec::new(),
+        mesh_instance_counts: vec![0; num_meshes],
+        material_bitsets: vec![specs::BitSet::new(); num_materials],
+    });
 
     let camera = components::Camera {
         yaw: 0.0,
@@ -340,70 +395,72 @@ fn main() -> Result<(), failure::Error> {
             1.0,
         )))
         .build();
+    let light_pos_intensities = vec![
+        (nalgebra::Vector3::new(10.0, 10.0, 2.0), 150.0),
+        (nalgebra::Vector3::new(8.0, 10.0, 2.0), 150.0),
+        (nalgebra::Vector3::new(8.0, 10.0, 4.0), 150.0),
+        (nalgebra::Vector3::new(10.0, 10.0, 4.0), 150.0),
+        (nalgebra::Vector3::new(-4.0, 0.0, -5.0), 250.0),
+        (nalgebra::Vector3::new(-5.0, 5.0, -2.0), 25.0),
+    ];
 
-    let instance_array_size = (1, 1, 1);
-
-    let pbr_aux = node::pbr::Aux {
-        frames,
-        align,
-        instance_array_size,
-        tonemapper_args: node::pbr::tonemap::TonemapperArgs {
-            exposure: 2.5,
-            curve: 0,
-            comparison_factor: 0.5,
-        },
-    };
-
-    world.add_resource(pbr_aux);
-    /*
-        scene: scene::Scene {
-            camera,
-            max_obj_instances: vec![512],
-            objects: vec![(helmet?, generate_instances(instance_array_size))],
-            lights: vec![
-                scene::Light {
-                    pos: nalgebra::Vector3::new(10.0, 10.0, 2.0),
-                    intensity: 150.0,
-                    color: [1.0, 1.0, 1.0],
-                    _pad: 0.0,
-                },
-                scene::Light {
-                    pos: nalgebra::Vector3::new(8.0, 10.0, 2.0),
-                    intensity: 150.0,
-                    color: [1.0, 1.0, 1.0],
-                    _pad: 0.0,
-                },
-                scene::Light {
-                    pos: nalgebra::Vector3::new(8.0, 10.0, 4.0),
-                    intensity: 150.0,
-                    color: [1.0, 1.0, 1.0],
-                    _pad: 0.0,
-                },
-                scene::Light {
-                    pos: nalgebra::Vector3::new(10.0, 10.0, 4.0),
-                    intensity: 150.0,
-                    color: [1.0, 1.0, 1.0],
-                    _pad: 0.0,
-                },
-                scene::Light {
-                    pos: nalgebra::Vector3::new(-4.0, 0.0, -5.0),
-                    intensity: 250.0,
-                    color: [1.0, 1.0, 1.0],
-                    _pad: 0.0,
-                },
-                scene::Light {
-                    pos: nalgebra::Vector3::new(-5.0, 5.0, -2.0),
-                    intensity: 25.0,
-                    color: [1.0, 1.0, 1.0],
-                    _pad: 0.0,
-                },
-            ],
-        },
-        material_storage,
-    };
-    */
+    for (pos, intensity) in light_pos_intensities.into_iter() {
+        world
+            .create_entity()
+            .with(components::Light {
+                intensity,
+                color: [1.0, 1.0, 1.0],
+            })
+            .with(components::Transform(
+                nalgebra::Similarity3::identity() * nalgebra::Translation3::from(pos),
+            ))
+            .build();
+    }
 
     let mut pbr_graph = pbr_graph_builder.build(&mut factory, &mut families, &mut world)?;
+
+    let camera_transform_system = {
+        let mut transforms = world.write_storage::<components::Transform>();
+        (systems::CameraTransformSystem {
+            reader_id: transforms.register_reader(),
+            dirty: BitSet::new(),
+        })
+    };
+
+    let pbr_aux_input_system = systems::PbrAuxInputSystem {
+        helmet_mesh: 0 as asset::MeshHandle,
+    };
+
+    let instance_cache_update_system = systems::InstanceCacheUpdateSystem {
+        transform_reader_id: world
+            .write_storage::<components::Transform>()
+            .register_reader(),
+        mesh_reader_id: world.write_storage::<components::Mesh>().register_reader(),
+        mesh_inserted: BitSet::new(),
+        mesh_deleted: BitSet::new(),
+        mesh_entity_bitsets: vec![BitSet::new(); num_meshes],
+        _pd: core::marker::PhantomData::<Backend>,
+    };
+
+    let mut dispatcher = DispatcherBuilder::new()
+        .with(systems::CameraInputSystem, "camera_input_system", &[])
+        .with(
+            camera_transform_system,
+            "camera_transform_system",
+            &["camera_input_system"],
+        )
+        .with(pbr_aux_input_system, "pbr_aux_input_system", &[])
+        .with(
+            instance_cache_update_system,
+            "instance_cache_update_system",
+            &["pbr_aux_input_system"],
+        )
+        .with(
+            systems::InputSystem,
+            "input_system",
+            &["pbr_aux_input_system", "camera_input_system"],
+        )
+        .build();
 
     let started = time::Instant::now();
 
@@ -416,21 +473,24 @@ fn main() -> Result<(), failure::Error> {
         let start = frames.start;
         for _ in &mut frames {
             factory.maintain(&mut families);
-            event_loop.poll_events(|event| match event {
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                } => should_close = true,
-                Event::WindowEvent { event, .. } => {
-                    input.handle_window_event(&event, &mut pbr_aux);
-                }
-                Event::DeviceEvent { event, .. } => {
-                    input.handle_device_event(&event, &mut pbr_aux);
-                }
-                _ => (),
-            });
-            pbr_aux.scene.objects[0].1 = generate_instances(pbr_aux.instance_array_size);
-            pbr_graph.run(&mut factory, &mut families, &mut pbr_aux);
+            {
+                let mut event_bucket = world.write_resource::<input::EventBucket>();
+                event_bucket.0.clear();
+
+                event_loop.poll_events(|event| match event {
+                    Event::WindowEvent {
+                        event: WindowEvent::CloseRequested,
+                        ..
+                    } => should_close = true,
+                    _ => {
+                        event_bucket.0.push(event);
+                    }
+                });
+            }
+
+            dispatcher.dispatch(&mut world.res);
+
+            pbr_graph.run(&mut factory, &mut families, &mut world);
 
             let elapsed = checkpoint.elapsed();
 
@@ -438,14 +498,17 @@ fn main() -> Result<(), failure::Error> {
                 let frames = frames.start - start;
                 let nanos = elapsed.as_secs() * 1_000_000_000 + elapsed.subsec_nanos() as u64;
                 log::info!("FPS: {}", frames * 1_000_000_000 / nanos);
-                log::info!("Tonemapper Settings: {}", pbr_aux.tonemapper_args);
+                log::info!(
+                    "Tonemapper Settings: {}",
+                    world.read_resource::<node::pbr::Aux>().tonemapper_args
+                );
                 checkpoint += elapsed;
                 break;
             }
         }
     }
 
-    pbr_graph.dispose(&mut factory, &mut pbr_aux);
+    pbr_graph.dispose(&mut factory, &mut world);
     Ok(())
 }
 

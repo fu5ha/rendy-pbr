@@ -1,5 +1,5 @@
 use failure::format_err;
-use gfx_hal as hal;
+use rendy::hal;
 use rendy::{
     command::QueueId,
     factory::{Factory, ImageState},
@@ -106,9 +106,9 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
     max_instances: u16,
     base_dir: P,
     buffers: &GltfBuffers,
-    material_storage: &mut MaterialStorage<B>,
-    primitive_storage: &mut PrimitiveStorage<B>,
-    mesh_storage: &mut MeshStorage,
+    material_storage: &mut Vec<Option<MaterialData<B>>>,
+    primitive_storage: &mut Vec<Option<Primitive<B>>>,
+    mesh_storage: &mut Vec<Option<Mesh>>,
     factory: &mut Factory<B>,
     queue: QueueId,
 ) -> Result<MeshHandle, failure::Error> {
@@ -158,7 +158,7 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
             .index()
             .ok_or(format_err!("Default material unimplemented"))?;
 
-        if let None = material_storage.0.get(mat_idx) {
+        if let None = material_storage[mat_idx] {
             let pbr_met_rough = material.pbr_metallic_roughness();
 
             let factors = MaterialFactors {
@@ -218,28 +218,28 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
             )?
             .build(state, factory, TextureUsage)?;
 
-            material_storage.0[mat_idx] = MaterialData {
+            material_storage[mat_idx] = Some(MaterialData {
                 factors,
                 albedo,
                 metallic_roughness,
                 normal,
                 ao,
-            };
+            });
         }
 
-        primitive_storage.0.push(Primitive {
+        primitive_storage.push(Some(Primitive {
             mesh_data: prim_mesh,
             mesh_handle: mesh.index(),
             mat: mat_idx as MaterialHandle,
-        });
+        }));
 
-        primitives.push(primitive_storage.0.len() - 1);
+        primitives.push(primitive_storage.len() - 1);
     }
 
-    mesh_storage.0[mesh.index()] = Mesh {
+    mesh_storage[mesh.index()] = Some(Mesh {
         primitives,
         max_instances,
-    };
+    });
 
     Ok(mesh.index() as MeshHandle)
 }

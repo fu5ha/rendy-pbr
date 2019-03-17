@@ -13,9 +13,9 @@ use rendy::{
     shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
 };
 
-use std::{collections::HashMap, mem::size_of};
+use std::mem::size_of;
 
-use gfx_hal as hal;
+use rendy::hal;
 
 use crate::{
     asset, components,
@@ -69,18 +69,6 @@ struct Settings {
     total_max_mesh_instances: u64,
 }
 
-impl From<&specs::World> for Settings {
-    fn from(world: &specs::World) -> Self {
-        Self::from_world(world)
-    }
-}
-
-impl From<&mut specs::World> for Settings {
-    fn from(world: &mut specs::World) -> Self {
-        Self::from_world(world)
-    }
-}
-
 impl Settings {
     const UNIFORM_SIZE: u64 = size_of::<UniformArgs>() as u64;
 
@@ -96,11 +84,13 @@ impl Settings {
             .map(|mesh| mesh.max_instances)
             .collect::<Vec<_>>();
 
+        let total_max_mesh_instances = max_mesh_instances.iter().map(|n| *n as u64).sum();
+
         Settings {
             align: aux.align,
             num_primitives: primitive_storage.0.len(),
             max_mesh_instances,
-            total_max_mesh_instances: max_mesh_instances.iter().map(|n| *n as u64).sum(),
+            total_max_mesh_instances,
         }
     }
 
@@ -285,7 +275,7 @@ where
             )?
         };
 
-        let settings = Settings::from_world(world);
+        let settings = Settings::from_world::<B>(world);
 
         let uniform_indirect_buffer = factory.create_buffer(
             aux.align,
@@ -404,20 +394,19 @@ where
         index: usize,
         world: &specs::World,
     ) -> PrepareResult {
-        if self.settings != world.into() {
+        if self.settings != Settings::from_world::<B>(world) {
             unimplemented!();
         }
 
         use rendy::memory::Write;
         use specs::prelude::*;
 
-        let aux = world.read_resource::<Aux>();
         let lights = world.read_storage::<components::Light>();
         let transforms = world.read_storage::<components::Transform>();
 
         let mut n_lights = 0;
         let mut lights_data = [Default::default(); crate::MAX_LIGHTS];
-        for (&light, &transform) in (&lights, &transforms).join() {
+        for (light, transform) in (&lights, &transforms).join() {
             if n_lights >= crate::MAX_LIGHTS {
                 break;
             }
@@ -459,27 +448,29 @@ where
         let indirect_offset = self.settings.indirect_offset(index as u64);
         let indirect_end = indirect_offset + self.settings.indirect_size();
         {
-            let indirects_mapped = self
+            let mut indirects_mapped = self
                 .uniform_indirect_buffer
                 .map(factory.device(), indirect_offset..indirect_end)
                 .unwrap();
 
-            for dirty_mesh in instance_cache.dirty_mesh_indirects {
-                for prim_index in mesh_storage.0[dirty_mesh].primitives {
-                    let start = self.settings.primitive_indirect_offset(prim_index);
-                    indirects_mapped
-                        .write(
-                            factory.device(),
-                            start..(start + size_of::<DrawIndexedCommand>() as u64),
-                        )
-                        .unwrap()
-                        .write(&[DrawIndexedCommand {
-                            index_count: primitive_storage.0[prim_index].mesh_data.len(),
-                            instance_count: instance_cache.counts[dirty_mesh],
-                            first_index: 0,
-                            vertex_offset: 0,
-                            first_instance: 0,
-                        }]);
+            for dirty_mesh in instance_cache.dirty_mesh_indirects.iter() {
+                for prim_index in mesh_storage.0[*dirty_mesh].primitives.iter() {
+                    let start = self.settings.primitive_indirect_offset(*prim_index);
+                    unsafe {
+                        indirects_mapped
+                            .write(
+                                factory.device(),
+                                start..(start + size_of::<DrawIndexedCommand>() as u64),
+                            )
+                            .unwrap()
+                            .write(&[DrawIndexedCommand {
+                                index_count: primitive_storage.0[*prim_index].mesh_data.len(),
+                                instance_count: instance_cache.mesh_instance_counts[*dirty_mesh],
+                                first_index: 0,
+                                vertex_offset: 0,
+                                first_instance: 0,
+                            }]);
+                    }
                 }
             }
         }
@@ -490,12 +481,12 @@ where
         let transforms_offset = self.settings.transforms_offset(index as u64);
         let transforms_end = transforms_offset + self.settings.transform_size();
         {
-            let transforms_mapped = self
+            let mut transforms_mapped = self
                 .transform_buffer
                 .map(factory.device(), transforms_offset..transforms_end)
                 .unwrap();
 
-            for (mesh, mesh_instance, &transform, _) in (
+            for (mesh, mesh_instance, transform, _) in (
                 &mesh_component_storage,
                 &mesh_instance_storage,
                 &transforms,
@@ -506,13 +497,15 @@ where
                 let start = self
                     .settings
                     .instance_transform_offset(mesh.0, mesh_instance.0);
-                transforms_mapped
-                    .write(
-                        factory.device(),
-                        start..(start + size_of::<Transform>() as u64),
-                    )
-                    .unwrap()
-                    .write(&[transform.0.to_homogeneous()]);
+                unsafe {
+                    transforms_mapped
+                        .write(
+                            factory.device(),
+                            start..(start + size_of::<Transform>() as u64),
+                        )
+                        .unwrap()
+                        .write(&[transform.0.to_homogeneous()]);
+                }
             }
         }
 

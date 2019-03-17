@@ -1,11 +1,11 @@
 use crate::{asset, components, input, node};
-use hibitset::BitSetLike;
 use nalgebra::Similarity3;
+use rendy::hal;
 use specs::prelude::*;
 
 pub struct CameraTransformSystem {
-    reader_id: ReaderId<ComponentEvent>,
-    dirty: BitSet,
+    pub reader_id: ReaderId<ComponentEvent>,
+    pub dirty: BitSet,
 }
 
 impl<'a> System<'a> for CameraTransformSystem {
@@ -27,7 +27,7 @@ impl<'a> System<'a> for CameraTransformSystem {
                 };
             }
         }
-        for (&camera, &mut transform, _) in (&cameras, &mut transforms, &self.dirty).join() {
+        for (camera, transform, _) in (&cameras, &mut transforms, &self.dirty).join() {
             transform.0 = Similarity3::face_towards(
                 &(camera.focus
                     + (camera.dist
@@ -50,9 +50,8 @@ impl<'a> System<'a> for InputSystem {
     type SystemData = (Read<'a, input::EventBucket>, Write<'a, input::InputState>);
 
     fn run(&mut self, (events, mut input): Self::SystemData) {
-        for &event in events.0.iter() {
+        for event in events.0.iter() {
             match event {
-                winit::Event::DeviceEvent { event, .. } => {}
                 winit::Event::WindowEvent { event, .. } => {
                     input.update_with_window_event(&event);
                 }
@@ -63,7 +62,7 @@ impl<'a> System<'a> for InputSystem {
 }
 
 pub struct PbrAuxInputSystem {
-    helmet_mesh: asset::MeshHandle,
+    pub helmet_mesh: asset::MeshHandle,
 }
 
 fn try_add_instance_array_size_x(ia_size: (u8, u8, u8), max: u16) -> (u8, u8, u8) {
@@ -111,7 +110,7 @@ impl<'a> System<'a> for PbrAuxInputSystem {
         let mesh = &mesh_storage.0[self.helmet_mesh];
 
         let mut input = (*input).clone();
-        for &event in events.0.iter() {
+        for event in events.0.iter() {
             match event {
                 winit::Event::WindowEvent { event, .. } => {
                     input.update_with_window_event(&event);
@@ -245,17 +244,17 @@ impl<'a> System<'a> for CameraInputSystem {
         WriteStorage<'a, components::Camera>,
     );
 
-    fn run(&mut self, (events, input, transforms, active_cameras, cameras): Self::SystemData) {
+    fn run(&mut self, (events, input, transforms, active_cameras, mut cameras): Self::SystemData) {
         use input::{
             MouseState, ROTATE_SENSITIVITY, TRANSLATE_SENSITIVITY, ZOOM_MOUSE_SENSITIVITY,
             ZOOM_SCROLL_SENSITIVITY,
         };
         use winit::{DeviceEvent, ElementState, ModifiersState, MouseScrollDelta};
-        if let Some((_, &transform, &mut camera)) =
+        if let Some((_, transform, camera)) =
             (&active_cameras, &transforms, &mut cameras).join().next()
         {
             let mut input = (*input).clone();
-            for &event in events.0.iter() {
+            for event in events.0.iter() {
                 match event {
                     winit::Event::WindowEvent { event, .. } => {
                         input.update_with_window_event(&event);
@@ -339,19 +338,20 @@ impl Component for MeshInstance {
 pub struct InstanceCache {
     pub dirty_entities: BitSet,
     pub dirty_mesh_indirects: Vec<asset::MeshHandle>,
-    pub counts: Vec<u32>,
+    pub mesh_instance_counts: Vec<u32>,
     pub material_bitsets: Vec<BitSet>,
 }
 
 pub struct InstanceCacheUpdateSystem<B> {
-    mesh_reader_id: ReaderId<ComponentEvent>,
-    inserted: BitSet,
-    deleted: BitSet,
-    mesh_bitsets: Vec<BitSet>,
-    _pd: core::marker::PhantomData<B>,
+    pub mesh_reader_id: ReaderId<ComponentEvent>,
+    pub transform_reader_id: ReaderId<ComponentEvent>,
+    pub mesh_inserted: BitSet,
+    pub mesh_deleted: BitSet,
+    pub mesh_entity_bitsets: Vec<BitSet>,
+    pub _pd: core::marker::PhantomData<B>,
 }
 
-impl<'a, B: gfx_hal::Backend + std::default::Default> System<'a> for InstanceCacheUpdateSystem<B> {
+impl<'a, B: hal::Backend + std::default::Default> System<'a> for InstanceCacheUpdateSystem<B> {
     type SystemData = (
         Entities<'a>,
         Write<'a, InstanceCache>,
@@ -374,8 +374,8 @@ impl<'a, B: gfx_hal::Backend + std::default::Default> System<'a> for InstanceCac
             transforms,
         ): Self::SystemData,
     ) {
-        self.inserted.clear();
-        self.deleted.clear();
+        self.mesh_inserted.clear();
+        self.mesh_deleted.clear();
         cache.dirty_entities.clear();
         cache.dirty_mesh_indirects.clear();
         {
@@ -386,36 +386,59 @@ impl<'a, B: gfx_hal::Backend + std::default::Default> System<'a> for InstanceCac
                         cache.dirty_entities.add(*id);
                     }
                     ComponentEvent::Inserted(id) => {
-                        self.inserted.add(*id);
+                        self.mesh_inserted.add(*id);
                     }
                     ComponentEvent::Removed(id) => {
-                        self.deleted.add(*id);
+                        self.mesh_deleted.add(*id);
                     }
                 };
             }
         }
-        for (entity, mesh, _) in (&entities, &meshes, &self.inserted).join() {
-            cache.counts[mesh.0] += 1;
-            for primitive_idx in mesh_storage.0[mesh.0].primitives {
-                let primitive = primitive_storage.0[primitive_idx];
+        {
+            let mesh_mask = meshes.mask();
+            let events = transforms.channel().read(&mut self.transform_reader_id);
+            for event in events {
+                match event {
+                    ComponentEvent::Modified(id) => {
+                        if mesh_mask.contains(*id) {
+                            cache.dirty_entities.add(*id);
+                        }
+                    }
+                    _ => (),
+                };
+            }
+        }
+        for (entity, mesh, _) in (&entities, &meshes, &self.mesh_inserted).join() {
+            cache.mesh_instance_counts[mesh.0] += 1;
+            for primitive_idx in mesh_storage.0[mesh.0].primitives.iter() {
+                let primitive = &primitive_storage.0[*primitive_idx];
                 cache.material_bitsets[primitive.mat].add(entity.id());
             }
-            self.mesh_bitsets[mesh.0].add(entity.id());
-            mesh_instances.insert(entity, MeshInstance(cache.counts[mesh.0] as InstanceIndex));
+            self.mesh_entity_bitsets[mesh.0].add(entity.id());
+            mesh_instances
+                .insert(
+                    entity,
+                    MeshInstance(cache.mesh_instance_counts[mesh.0] as InstanceIndex),
+                )
+                .unwrap();
             cache.dirty_entities.add(entity.id());
             cache.dirty_mesh_indirects.push(mesh.0);
         }
-        for (entity, mesh, _) in (&entities, &meshes, &self.deleted).join() {
+        for (entity, mesh, _) in (&entities, &meshes, &self.mesh_deleted).join() {
             let deleted_idx = mesh_instances.get(entity).unwrap().0;
             mesh_instances.remove(entity);
-            self.mesh_bitsets[mesh.0].remove(entity.id());
-            cache.counts[mesh.0] -= 1;
-            for primitive_idx in mesh_storage.0[mesh.0].primitives {
-                let primitive = primitive_storage.0[primitive_idx];
+            self.mesh_entity_bitsets[mesh.0].remove(entity.id());
+            cache.mesh_instance_counts[mesh.0] -= 1;
+            for primitive_idx in mesh_storage.0[mesh.0].primitives.iter() {
+                let primitive = &primitive_storage.0[*primitive_idx];
                 cache.material_bitsets[primitive.mat].remove(entity.id());
             }
-            for (entity, &mut mesh_instance, _) in
-                (&entities, &mut mesh_instances, &self.mesh_bitsets[mesh.0]).join()
+            for (entity, mesh_instance, _) in (
+                &entities,
+                &mut mesh_instances,
+                &self.mesh_entity_bitsets[mesh.0],
+            )
+                .join()
             {
                 if mesh_instance.0 > deleted_idx {
                     mesh_instance.0 -= 1;
