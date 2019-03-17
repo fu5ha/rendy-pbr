@@ -11,7 +11,7 @@ use rendy::{
     shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
 };
 
-use gfx_hal as hal;
+use rendy::hal;
 
 use std::mem::size_of;
 
@@ -92,7 +92,7 @@ impl Settings {
 pub struct PipelineDesc;
 
 #[derive(Debug)]
-pub struct Pipeline<B: gfx_hal::Backend> {
+pub struct Pipeline<B: hal::Backend> {
     buffer: Buffer<B>,
     sets: Vec<B::DescriptorSet>,
     descriptor_pool: B::DescriptorPool,
@@ -103,7 +103,7 @@ pub struct Pipeline<B: gfx_hal::Backend> {
 
 impl<B> SimpleGraphicsPipelineDesc<B, specs::World> for PipelineDesc
 where
-    B: gfx_hal::Backend,
+    B: hal::Backend,
 {
     type Pipeline = Pipeline<B>;
 
@@ -116,7 +116,7 @@ where
         }]
     }
 
-    fn depth_stencil(&self) -> Option<gfx_hal::pso::DepthStencilDesc> {
+    fn depth_stencil(&self) -> Option<hal::pso::DepthStencilDesc> {
         None
     }
 
@@ -125,7 +125,7 @@ where
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
         _world: &mut specs::World,
-    ) -> gfx_hal::pso::GraphicsShaderSet<'a, B> {
+    ) -> hal::pso::GraphicsShaderSet<'a, B> {
         storage.clear();
 
         log::trace!("Load shader module '{:#?}'", *VERTEX);
@@ -134,16 +134,16 @@ where
         log::trace!("Load shader module '{:#?}'", *FRAGMENT);
         storage.push(FRAGMENT.module(factory).unwrap());
 
-        gfx_hal::pso::GraphicsShaderSet {
-            vertex: gfx_hal::pso::EntryPoint {
+        hal::pso::GraphicsShaderSet {
+            vertex: hal::pso::EntryPoint {
                 entry: "main",
                 module: &storage[0],
-                specialization: gfx_hal::pso::Specialization::default(),
+                specialization: hal::pso::Specialization::default(),
             },
-            fragment: Some(gfx_hal::pso::EntryPoint {
+            fragment: Some(hal::pso::EntryPoint {
                 entry: "main",
                 module: &storage[1],
-                specialization: gfx_hal::pso::Specialization::default(),
+                specialization: hal::pso::Specialization::default(),
             }),
             hull: None,
             domain: None,
@@ -291,7 +291,7 @@ where
 
 impl<B> SimpleGraphicsPipeline<B, specs::World> for Pipeline<B>
 where
-    B: gfx_hal::Backend,
+    B: hal::Backend,
 {
     type Desc = PipelineDesc;
 

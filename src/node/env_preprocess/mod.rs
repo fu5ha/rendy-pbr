@@ -1,6 +1,6 @@
 use rendy::{command::QueueId, factory::ImageState, texture::Texture};
 
-use gfx_hal as hal;
+use rendy::hal;
 
 pub mod equirectangular_to_cube_faces;
 pub mod faces_to_cubemap;

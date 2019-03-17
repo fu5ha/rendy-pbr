@@ -5,16 +5,16 @@ use genmesh::{
 
 use rendy::{
     command::{QueueId, RenderPassEncoder},
-    factory::{Factory},
-    hal::{pso::DescriptorPool, Device},
+    factory::Factory,
     graph::{render::*, NodeBuffer, NodeImage},
+    hal::{pso::DescriptorPool, Device},
     memory::MemoryUsageValue,
-    mesh::{AsVertex, Position, Mesh},
-    resource::{buffer::Buffer},
+    mesh::{AsVertex, Mesh, Position},
+    resource::buffer::Buffer,
     shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
 };
 
-use gfx_hal as hal;
+use rendy::hal;
 
 use crate::node::env_preprocess::Aux;
 
@@ -62,9 +62,7 @@ impl Settings {
     const UNIFORM_SIZE: u64 = std::mem::size_of::<UniformArgs>() as u64;
 
     fn from_aux<B: hal::Backend>(aux: &Aux<B>) -> Self {
-        Settings {
-            align: aux.align,
-        }
+        Settings { align: aux.align }
     }
 
     #[inline]
@@ -76,14 +74,14 @@ impl Settings {
 #[derive(Debug, Default)]
 pub struct PipelineDesc;
 
-pub struct Pipeline<B: gfx_hal::Backend> {
+pub struct Pipeline<B: hal::Backend> {
     cube: Mesh<B>,
     set: B::DescriptorSet,
     pool: B::DescriptorPool,
     buffer: Buffer<B>,
 }
 
-impl<B: gfx_hal::Backend> std::fmt::Debug for Pipeline<B> {
+impl<B: hal::Backend> std::fmt::Debug for Pipeline<B> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "Equirect Pipeline")
     }
@@ -91,31 +89,25 @@ impl<B: gfx_hal::Backend> std::fmt::Debug for Pipeline<B> {
 
 impl<B> SimpleGraphicsPipelineDesc<B, Aux<B>> for PipelineDesc
 where
-    B: gfx_hal::Backend,
+    B: hal::Backend,
 {
     type Pipeline = Pipeline<B>;
 
     fn vertices(
         &self,
     ) -> Vec<(
-        Vec<gfx_hal::pso::Element<gfx_hal::format::Format>>,
-        gfx_hal::pso::ElemStride,
-        gfx_hal::pso::InstanceRate,
+        Vec<hal::pso::Element<hal::format::Format>>,
+        hal::pso::ElemStride,
+        hal::pso::InstanceRate,
     )> {
         vec![Position::VERTEX.gfx_vertex_input_desc(0)]
     }
 
-    fn colors(&self) -> Vec<gfx_hal::pso::ColorBlendDesc> {
-        vec![
-            gfx_hal::pso::ColorBlendDesc(
-                gfx_hal::pso::ColorMask::ALL,
-                gfx_hal::pso::BlendState::ALPHA,
-            );
-            6
-        ]
+    fn colors(&self) -> Vec<hal::pso::ColorBlendDesc> {
+        vec![hal::pso::ColorBlendDesc(hal::pso::ColorMask::ALL, hal::pso::BlendState::ALPHA,); 6]
     }
 
-    fn depth_stencil(&self) -> Option<gfx_hal::pso::DepthStencilDesc> {
+    fn depth_stencil(&self) -> Option<hal::pso::DepthStencilDesc> {
         None
     }
 
@@ -124,7 +116,7 @@ where
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
         _aux: &mut Aux<B>,
-    ) -> gfx_hal::pso::GraphicsShaderSet<'a, B> {
+    ) -> hal::pso::GraphicsShaderSet<'a, B> {
         storage.clear();
 
         log::trace!("Load shader module '{:#?}'", *VERTEX);
@@ -133,16 +125,16 @@ where
         log::trace!("Load shader module '{:#?}'", *FRAGMENT);
         storage.push(FRAGMENT.module(factory).unwrap());
 
-        gfx_hal::pso::GraphicsShaderSet {
-            vertex: gfx_hal::pso::EntryPoint {
+        hal::pso::GraphicsShaderSet {
+            vertex: hal::pso::EntryPoint {
                 entry: "main",
                 module: &storage[0],
-                specialization: gfx_hal::pso::Specialization::default(),
+                specialization: hal::pso::Specialization::default(),
             },
-            fragment: Some(gfx_hal::pso::EntryPoint {
+            fragment: Some(hal::pso::EntryPoint {
                 entry: "main",
                 module: &storage[1],
-                specialization: gfx_hal::pso::Specialization::default(),
+                specialization: hal::pso::Specialization::default(),
             }),
             hull: None,
             domain: None,
@@ -154,25 +146,25 @@ where
         Layout {
             sets: vec![SetLayout {
                 bindings: vec![
-                    gfx_hal::pso::DescriptorSetLayoutBinding {
+                    hal::pso::DescriptorSetLayoutBinding {
                         binding: 0,
-                        ty: gfx_hal::pso::DescriptorType::UniformBuffer,
+                        ty: hal::pso::DescriptorType::UniformBuffer,
                         count: 1,
-                        stage_flags: gfx_hal::pso::ShaderStageFlags::GRAPHICS,
+                        stage_flags: hal::pso::ShaderStageFlags::GRAPHICS,
                         immutable_samplers: false,
                     },
-                    gfx_hal::pso::DescriptorSetLayoutBinding {
+                    hal::pso::DescriptorSetLayoutBinding {
                         binding: 1,
-                        ty: gfx_hal::pso::DescriptorType::Sampler,
+                        ty: hal::pso::DescriptorType::Sampler,
                         count: 1,
-                        stage_flags: gfx_hal::pso::ShaderStageFlags::FRAGMENT,
+                        stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
                         immutable_samplers: false,
                     },
-                    gfx_hal::pso::DescriptorSetLayoutBinding {
+                    hal::pso::DescriptorSetLayoutBinding {
                         binding: 2,
-                        ty: gfx_hal::pso::DescriptorType::SampledImage,
+                        ty: hal::pso::DescriptorType::SampledImage,
                         count: 1,
-                        stage_flags: gfx_hal::pso::ShaderStageFlags::FRAGMENT,
+                        stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
                         immutable_samplers: false,
                     },
                 ],
@@ -231,15 +223,11 @@ where
 
         let settings: Settings = aux.into();
 
-        let mut buffer = factory
-            .create_buffer(
-                aux.align,
-                settings.buffer_frame_size(),
-                (
-                    hal::buffer::Usage::UNIFORM,
-                    MemoryUsageValue::Dynamic,
-                ),
-            )?;
+        let mut buffer = factory.create_buffer(
+            aux.align,
+            settings.buffer_frame_size(),
+            (hal::buffer::Usage::UNIFORM, MemoryUsageValue::Dynamic),
+        )?;
 
         let set = unsafe {
             let set = pool.allocate_set(&set_layouts[0])?;
@@ -276,29 +264,58 @@ where
 
         let origin = nalgebra::Point3::origin();
         unsafe {
-            factory
-                .upload_visible_buffer(
-                    &mut buffer,
-                    0,
-                    &[UniformArgs {
-                        proj: {
-                            let mut proj = nalgebra::Perspective3::<f32>::new(1.0, std::f32::consts::FRAC_PI_2, 0.1, 100.0).to_homogeneous();
-                            proj[(1, 1)] *= -1.0;
-                            proj
-                        },
-                        views: [
-                            nalgebra::Matrix4::look_at_rh(&origin, &nalgebra::Point3::new(0.0, 0.0, 1.0), &nalgebra::Vector3::y()),
-                            nalgebra::Matrix4::look_at_rh(&origin, &nalgebra::Point3::new(0.0, 0.0, -1.0), &nalgebra::Vector3::y()),
-                            nalgebra::Matrix4::look_at_rh(&origin, &nalgebra::Point3::new(1.0, 0.0, 0.0), &nalgebra::Vector3::y()),
-                            nalgebra::Matrix4::look_at_rh(&origin, &nalgebra::Point3::new(-1.0, 0.0, 0.0), &nalgebra::Vector3::y()),
-                            nalgebra::Matrix4::look_at_rh(&origin, &nalgebra::Point3::new(0.0, 1.0, 0.0), &-nalgebra::Vector3::z()),
-                            nalgebra::Matrix4::look_at_rh(&origin, &nalgebra::Point3::new(0.0, -1.0, 0.0), &nalgebra::Vector3::z()),
-                        ]
-                    }],
-                )?
+            factory.upload_visible_buffer(
+                &mut buffer,
+                0,
+                &[UniformArgs {
+                    proj: {
+                        let mut proj = nalgebra::Perspective3::<f32>::new(
+                            1.0,
+                            std::f32::consts::FRAC_PI_2,
+                            0.1,
+                            100.0,
+                        )
+                        .to_homogeneous();
+                        proj[(1, 1)] *= -1.0;
+                        proj
+                    },
+                    views: [
+                        nalgebra::Matrix4::look_at_rh(
+                            &origin,
+                            &nalgebra::Point3::new(0.0, 0.0, 1.0),
+                            &nalgebra::Vector3::y(),
+                        ),
+                        nalgebra::Matrix4::look_at_rh(
+                            &origin,
+                            &nalgebra::Point3::new(0.0, 0.0, -1.0),
+                            &nalgebra::Vector3::y(),
+                        ),
+                        nalgebra::Matrix4::look_at_rh(
+                            &origin,
+                            &nalgebra::Point3::new(1.0, 0.0, 0.0),
+                            &nalgebra::Vector3::y(),
+                        ),
+                        nalgebra::Matrix4::look_at_rh(
+                            &origin,
+                            &nalgebra::Point3::new(-1.0, 0.0, 0.0),
+                            &nalgebra::Vector3::y(),
+                        ),
+                        nalgebra::Matrix4::look_at_rh(
+                            &origin,
+                            &nalgebra::Point3::new(0.0, 1.0, 0.0),
+                            &-nalgebra::Vector3::z(),
+                        ),
+                        nalgebra::Matrix4::look_at_rh(
+                            &origin,
+                            &nalgebra::Point3::new(0.0, -1.0, 0.0),
+                            &nalgebra::Vector3::z(),
+                        ),
+                    ],
+                }],
+            )?
         };
 
-        Ok(Pipeline { 
+        Ok(Pipeline {
             cube,
             set,
             pool,
@@ -309,7 +326,7 @@ where
 
 impl<B> SimpleGraphicsPipeline<B, Aux<B>> for Pipeline<B>
 where
-    B: gfx_hal::Backend,
+    B: hal::Backend,
 {
     type Desc = PipelineDesc;
 
@@ -331,16 +348,8 @@ where
         _index: usize,
         _aux: &Aux<B>,
     ) {
-        assert!(self
-            .cube
-            .bind(&[Position::VERTEX], &mut encoder)
-            .is_ok());
-        encoder.bind_graphics_descriptor_sets(
-            layout,
-            0,
-            Some(&self.set),
-            std::iter::empty(),
-        );
+        assert!(self.cube.bind(&[Position::VERTEX], &mut encoder).is_ok());
+        encoder.bind_graphics_descriptor_sets(layout, 0, Some(&self.set), std::iter::empty());
         encoder.draw(0..36, 0..1);
     }
 

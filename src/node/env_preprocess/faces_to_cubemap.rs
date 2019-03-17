@@ -12,7 +12,7 @@ use rendy::{
     texture::Texture,
 };
 
-use gfx_hal as hal;
+use rendy::hal;
 
 #[derive(Debug)]
 pub struct FacesToCubemap<B: hal::Backend> {
@@ -61,7 +61,7 @@ pub trait FacesToCubemapResource<B: hal::Backend> {
 
 impl<B, FR> NodeBuilder<B, FR> for FacesToCubemapBuilder
 where
-    B: gfx_hal::Backend,
+    B: hal::Backend,
     FR: FacesToCubemapResource<B>,
 {
     fn family(&self, _factory: &mut Factory<B>, families: &[Family<B>]) -> Option<FamilyId> {
@@ -82,10 +82,10 @@ where
                 (
                     image,
                     ImageAccess {
-                        access: gfx_hal::image::Access::TRANSFER_READ,
-                        layout: gfx_hal::image::Layout::TransferSrcOptimal,
-                        usage: gfx_hal::image::Usage::TRANSFER_SRC,
-                        stages: gfx_hal::pso::PipelineStage::TRANSFER,
+                        access: hal::image::Access::TRANSFER_READ,
+                        layout: hal::image::Layout::TransferSrcOptimal,
+                        usage: hal::image::Usage::TRANSFER_SRC,
+                        stages: hal::pso::PipelineStage::TRANSFER,
                     },
                 )
             })
@@ -110,7 +110,7 @@ where
 
         let mut pool = factory.create_command_pool(family)?;
 
-        let buf_initial = pool.allocate_buffers(1).pop()?;
+        let buf_initial = pool.allocate_buffers(1).pop().unwrap();
         let mut buf_recording = buf_initial.begin(MultiShot(SimultaneousUse), ());
         let mut encoder = buf_recording.encoder();
         let target_cubemap = aux.get_cubemap();
@@ -119,7 +119,7 @@ where
             let (stages, barriers) = gfx_acquire_barriers(None, images.iter());
             log::info!("Acquire {:?} : {:#?}", stages, barriers);
             if !barriers.is_empty() {
-                encoder.pipeline_barrier(stages, gfx_hal::memory::Dependencies::empty(), barriers);
+                encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
             }
         }
         for (i, face) in images.iter().enumerate() {
@@ -128,21 +128,21 @@ where
                 face.image.raw(),
                 face.layout,
                 target_cubemap.image.raw(),
-                gfx_hal::image::Layout::TransferDstOptimal,
-                Some(gfx_hal::command::ImageCopy {
-                    src_subresource: gfx_hal::image::SubresourceLayers {
-                        aspects: gfx_hal::format::Aspects::COLOR,
+                hal::image::Layout::TransferDstOptimal,
+                Some(hal::command::ImageCopy {
+                    src_subresource: hal::image::SubresourceLayers {
+                        aspects: hal::format::Aspects::COLOR,
                         level: 0,
                         layers: 0..1,
                     },
-                    src_offset: gfx_hal::image::Offset::ZERO,
-                    dst_subresource: gfx_hal::image::SubresourceLayers {
-                        aspects: gfx_hal::format::Aspects::COLOR,
+                    src_offset: hal::image::Offset::ZERO,
+                    dst_subresource: hal::image::SubresourceLayers {
+                        aspects: hal::format::Aspects::COLOR,
                         level: 0,
                         layers: i..i + 1,
                     },
-                    dst_offset: gfx_hal::image::Offset::ZERO,
-                    extent: gfx_hal::image::Extent {
+                    dst_offset: hal::image::Offset::ZERO,
+                    extent: hal::image::Extent {
                         width: face.image.kind().extent().width,
                         height: face.image.kind().extent().height,
                         depth: 1,
@@ -153,24 +153,24 @@ where
         {
             let (mut stages, mut barriers) = gfx_release_barriers(None, images.iter());
             let end_state = aux.cubemap_end_state();
-            stages.start |= gfx_hal::pso::PipelineStage::TRANSFER;
+            stages.start |= hal::pso::PipelineStage::TRANSFER;
             stages.end |= end_state.stage;
-            barriers.push(gfx_hal::memory::Barrier::Image {
+            barriers.push(hal::memory::Barrier::Image {
                 states: (
-                    gfx_hal::image::Access::TRANSFER_WRITE,
-                    gfx_hal::image::Layout::TransferDstOptimal,
+                    hal::image::Access::TRANSFER_WRITE,
+                    hal::image::Layout::TransferDstOptimal,
                 )..(end_state.access, end_state.layout),
                 families: None,
                 target: target_cubemap.image.raw(),
-                range: gfx_hal::image::SubresourceRange {
-                    aspects: gfx_hal::format::Aspects::COLOR,
+                range: hal::image::SubresourceRange {
+                    aspects: hal::format::Aspects::COLOR,
                     levels: 0..1,
                     layers: 0..6,
                 },
             });
 
             log::info!("Release {:?} : {:#?}", stages, barriers);
-            encoder.pipeline_barrier(stages, gfx_hal::memory::Dependencies::empty(), barriers);
+            encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
         }
 
         let (submit, buffer) = buf_recording.finish().submit();
@@ -185,7 +185,7 @@ where
 
 impl<B, FR> DynNode<B, FR> for FacesToCubemap<B>
 where
-    B: gfx_hal::Backend,
+    B: hal::Backend,
     FR: FacesToCubemapResource<B>,
 {
     unsafe fn run<'a>(
@@ -194,7 +194,7 @@ where
         queue: &mut Queue<B>,
         _aux: &FR,
         _frames: &Frames<B>,
-        waits: &[(&'a B::Semaphore, gfx_hal::pso::PipelineStage)],
+        waits: &[(&'a B::Semaphore, hal::pso::PipelineStage)],
         signals: &[&'a B::Semaphore],
         fence: Option<&mut Fence<B>>,
     ) {

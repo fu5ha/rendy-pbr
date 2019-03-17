@@ -1,12 +1,5 @@
 use derivative::Derivative;
-use winit::{
-    DeviceEvent, ElementState, ModifiersState, MouseButton, MouseScrollDelta, VirtualKeyCode,
-    WindowEvent,
-};
-
-use gfx_hal as hal;
-
-use crate::node::pbr::Aux;
+use winit::{ElementState, ModifiersState, WindowEvent};
 
 #[derive(Default)]
 pub struct EventBucket(pub Vec<winit::Event>);
