@@ -8,10 +8,14 @@ use rendy::{
     factory::{Config, Factory, ImageState},
     graph::{present::PresentNode, render::*, GraphBuilder},
     memory::MemoryUsageValue,
-    resource::image::TextureUsage,
 };
 
-use std::{fs::File, path::Path, time};
+use std::{
+    collections::{HashMap, HashSet},
+    fs::File,
+    path::Path,
+    time,
+};
 
 use rendy::hal;
 
@@ -64,11 +68,29 @@ pub fn generate_instances(size: (u8, u8, u8)) -> Vec<nalgebra::Similarity3<f32>>
 }
 
 #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
-fn main() -> Result<(), failure::Error> {
+fn main() {
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Warn)
         .filter_module("rendy_pbr", log::LevelFilter::Trace)
         .init();
+
+    match run() {
+        Err(e) => log::error!("{}\n\nBACKTRACE:\n{}", e, e.backtrace()),
+        _ => (),
+    }
+}
+
+#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+fn run() -> Result<(), failure::Error> {
+    // Initialize specs and register components
+    let mut world = specs::World::new();
+
+    world.register::<components::Transform>();
+    world.register::<components::Mesh>();
+    world.register::<components::Camera>();
+    world.register::<components::ActiveCamera>();
+    world.register::<components::Light>();
+    world.register::<systems::MeshInstance>();
 
     let config: Config = Default::default();
 
@@ -191,6 +213,7 @@ fn main() -> Result<(), failure::Error> {
         .build(&event_loop)?;
 
     let input = input::InputState::new(window.get_inner_size().unwrap());
+    let event_bucket = input::EventBucket(Vec::new());
 
     event_loop.poll_events(|_| ());
 
@@ -203,7 +226,6 @@ fn main() -> Result<(), failure::Error> {
         surface.kind(),
         1,
         hal::format::Format::Rgba32Float,
-        MemoryUsageValue::Data,
         Some(hal::command::ClearValue::Color([0.1, 0.3, 0.4, 1.0].into())),
     );
 
@@ -211,7 +233,6 @@ fn main() -> Result<(), failure::Error> {
         surface.kind(),
         1,
         factory.get_surface_format(&surface),
-        MemoryUsageValue::Data,
         Some(hal::command::ClearValue::Color([0.1, 0.3, 0.4, 1.0].into())),
     );
 
@@ -219,7 +240,6 @@ fn main() -> Result<(), failure::Error> {
         surface.kind(),
         1,
         hal::format::Format::D16Unorm,
-        MemoryUsageValue::Data,
         Some(hal::command::ClearValue::DepthStencil(
             hal::command::ClearDepthStencil(1.0, 0),
         )),
@@ -245,19 +265,10 @@ fn main() -> Result<(), failure::Error> {
     let present_builder =
         PresentNode::builder(&factory, surface, color).with_dependency(tonemap_pass);
 
-    let frames = present_builder.image_count() as usize;
-
-    pbr_graph_builder.add_node(present_builder);
-
-    let mut world = specs::World::new();
-    world.register::<components::Transform>();
-    world.register::<components::Mesh>();
-    world.register::<components::Camera>();
-    world.register::<components::Light>();
-    world.register::<systems::MeshInstance>();
-    world.add_resource(input);
-
     let instance_array_size = (1, 1, 1);
+
+    let mut anonymous_mesh_count: usize = 0;
+    let mut mesh_handles = HashMap::new();
 
     let (material_storage, primitive_storage, mesh_storage) = {
         let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/gltf/helmet/");
@@ -322,6 +333,19 @@ fn main() -> Result<(), failure::Error> {
                     queue,
                 )?;
 
+                let name = node.name().map_or_else(
+                    || {
+                        let name = format!("__anonymous_{}", anonymous_mesh_count);
+                        anonymous_mesh_count += 1;
+                        name
+                    },
+                    String::from,
+                );
+
+                if let Some(dupe_name) = mesh_handles.insert(name, mesh_handle) {
+                    failure::bail!("Multiple meshes with the same name: {}", dupe_name);
+                }
+
                 for transform in transforms {
                     world
                         .create_entity()
@@ -354,12 +378,8 @@ fn main() -> Result<(), failure::Error> {
 
     let num_meshes = mesh_storage.0.len();
     let num_materials = material_storage.0.len();
-    world.add_resource(material_storage);
-    world.add_resource(primitive_storage);
-    world.add_resource(mesh_storage);
-
     let pbr_aux = node::pbr::Aux {
-        frames,
+        frames: present_builder.image_count() as usize,
         align,
         instance_array_size,
         tonemapper_args: node::pbr::tonemap::TonemapperArgs {
@@ -368,15 +388,6 @@ fn main() -> Result<(), failure::Error> {
             comparison_factor: 0.5,
         },
     };
-
-    world.add_resource(pbr_aux);
-
-    world.add_resource(systems::InstanceCache {
-        dirty_entities: specs::BitSet::new(),
-        dirty_mesh_indirects: Vec::new(),
-        mesh_instance_counts: vec![0; num_meshes],
-        material_bitsets: vec![specs::BitSet::new(); num_materials],
-    });
 
     let camera = components::Camera {
         yaw: 0.0,
@@ -389,6 +400,7 @@ fn main() -> Result<(), failure::Error> {
     world
         .create_entity()
         .with(camera)
+        .with(components::ActiveCamera)
         .with(components::Transform(nalgebra::Similarity3::from_parts(
             nalgebra::Translation3::new(0.0, 0.0, 10.0),
             nalgebra::UnitQuaternion::identity(),
@@ -417,6 +429,20 @@ fn main() -> Result<(), failure::Error> {
             .build();
     }
 
+    // Add specs resources
+    world.add_resource(pbr_aux);
+    world.add_resource(input);
+    world.add_resource(event_bucket);
+    world.add_resource(material_storage);
+    world.add_resource(primitive_storage);
+    world.add_resource(mesh_storage);
+    world.add_resource(systems::InstanceCache {
+        dirty_entities: specs::BitSet::new(),
+        dirty_mesh_indirects: HashSet::new(),
+        mesh_instance_counts: vec![0; num_meshes],
+        material_bitsets: vec![specs::BitSet::new(); num_materials],
+    });
+
     let mut pbr_graph = pbr_graph_builder.build(&mut factory, &mut families, &mut world)?;
 
     let camera_transform_system = {
@@ -431,15 +457,19 @@ fn main() -> Result<(), failure::Error> {
         helmet_mesh: 0 as asset::MeshHandle,
     };
 
-    let instance_cache_update_system = systems::InstanceCacheUpdateSystem {
-        transform_reader_id: world
-            .write_storage::<components::Transform>()
-            .register_reader(),
-        mesh_reader_id: world.write_storage::<components::Mesh>().register_reader(),
-        mesh_inserted: BitSet::new(),
-        mesh_deleted: BitSet::new(),
-        mesh_entity_bitsets: vec![BitSet::new(); num_meshes],
-        _pd: core::marker::PhantomData::<Backend>,
+    let instance_cache_update_system = {
+        let mut mesh_storage = world.write_storage::<components::Mesh>();
+
+        systems::InstanceCacheUpdateSystem {
+            transform_reader_id: world
+                .write_storage::<components::Transform>()
+                .register_reader(),
+            mesh_reader_id: mesh_storage.register_reader(),
+            mesh_inserted: mesh_storage.mask().clone(),
+            mesh_deleted: BitSet::new(),
+            mesh_entity_bitsets: vec![BitSet::new(); num_meshes],
+            _pd: core::marker::PhantomData::<Backend>,
+        }
     };
 
     let mut dispatcher = DispatcherBuilder::new()
@@ -491,6 +521,8 @@ fn main() -> Result<(), failure::Error> {
             dispatcher.dispatch(&mut world.res);
 
             pbr_graph.run(&mut factory, &mut families, &mut world);
+
+            world.maintain();
 
             let elapsed = checkpoint.elapsed();
 

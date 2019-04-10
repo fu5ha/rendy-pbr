@@ -3,6 +3,8 @@ use nalgebra::Similarity3;
 use rendy::hal;
 use specs::prelude::*;
 
+use std::collections::HashSet;
+
 pub struct CameraTransformSystem {
     pub reader_id: ReaderId<ComponentEvent>,
     pub dirty: BitSet,
@@ -334,10 +336,10 @@ impl Component for MeshInstance {
     type Storage = DenseVecStorage<Self>;
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct InstanceCache {
     pub dirty_entities: BitSet,
-    pub dirty_mesh_indirects: Vec<asset::MeshHandle>,
+    pub dirty_mesh_indirects: HashSet<asset::MeshHandle>,
     pub mesh_instance_counts: Vec<u32>,
     pub material_bitsets: Vec<BitSet>,
 }
@@ -351,7 +353,7 @@ pub struct InstanceCacheUpdateSystem<B> {
     pub _pd: core::marker::PhantomData<B>,
 }
 
-impl<'a, B: hal::Backend + std::default::Default> System<'a> for InstanceCacheUpdateSystem<B> {
+impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
     type SystemData = (
         Entities<'a>,
         Write<'a, InstanceCache>,
@@ -374,8 +376,6 @@ impl<'a, B: hal::Backend + std::default::Default> System<'a> for InstanceCacheUp
             transforms,
         ): Self::SystemData,
     ) {
-        self.mesh_inserted.clear();
-        self.mesh_deleted.clear();
         cache.dirty_entities.clear();
         cache.dirty_mesh_indirects.clear();
         {
@@ -422,7 +422,7 @@ impl<'a, B: hal::Backend + std::default::Default> System<'a> for InstanceCacheUp
                 )
                 .unwrap();
             cache.dirty_entities.add(entity.id());
-            cache.dirty_mesh_indirects.push(mesh.0);
+            cache.dirty_mesh_indirects.insert(mesh.0);
         }
         for (entity, mesh, _) in (&entities, &meshes, &self.mesh_deleted).join() {
             let deleted_idx = mesh_instances.get(entity).unwrap().0;
@@ -445,7 +445,9 @@ impl<'a, B: hal::Backend + std::default::Default> System<'a> for InstanceCacheUp
                     cache.dirty_entities.add(entity.id());
                 }
             }
-            cache.dirty_mesh_indirects.push(mesh.0);
+            cache.dirty_mesh_indirects.insert(mesh.0);
         }
+        self.mesh_inserted.clear();
+        self.mesh_deleted.clear();
     }
 }

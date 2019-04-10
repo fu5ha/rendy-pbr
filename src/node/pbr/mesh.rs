@@ -1,14 +1,13 @@
 use rendy::{
     command::{DrawIndexedCommand, QueueId, RenderPassEncoder},
     factory::Factory,
-    graph::{render::*, NodeBuffer, NodeImage},
+    graph::{render::*, GraphContext, NodeBuffer, NodeImage},
     hal::{pso::DescriptorPool, Device},
     memory::MemoryUsageValue,
     mesh::{AsVertex, PosNormTangTex, Transform},
     resource::{
-        buffer::Buffer,
-        image::{Filter, WrapMode},
-        sampler::Sampler,
+        Buffer, BufferInfo, DescriptorSetLayout, Escape, Filter, Handle, Sampler, SamplerInfo,
+        WrapMode,
     },
     shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
 };
@@ -53,9 +52,9 @@ pub struct PipelineDesc;
 #[derive(Debug)]
 pub struct Pipeline<B: hal::Backend> {
     descriptor_pool: B::DescriptorPool,
-    uniform_indirect_buffer: Buffer<B>,
-    transform_buffer: Buffer<B>,
-    texture_sampler: Sampler<B>,
+    uniform_indirect_buffer: Escape<Buffer<B>>,
+    transform_buffer: Escape<Buffer<B>>,
+    texture_sampler: Escape<Sampler<B>>,
     frame_sets: Vec<B::DescriptorSet>,
     mat_sets: Vec<B::DescriptorSet>,
     settings: Settings,
@@ -210,15 +209,15 @@ where
         &self,
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
-        _aux: &mut specs::World,
+        _aux: &specs::World,
     ) -> hal::pso::GraphicsShaderSet<'a, B> {
         storage.clear();
 
         log::trace!("Load shader module '{:#?}'", *VERTEX);
-        storage.push(VERTEX.module(factory).unwrap());
+        storage.push(unsafe { VERTEX.module(factory).unwrap() });
 
         log::trace!("Load shader module '{:#?}'", *FRAGMENT);
-        storage.push(FRAGMENT.module(factory).unwrap());
+        storage.push(unsafe { FRAGMENT.module(factory).unwrap() });
 
         hal::pso::GraphicsShaderSet {
             vertex: hal::pso::EntryPoint {
@@ -239,12 +238,13 @@ where
 
     fn build<'a>(
         self,
+        _ctx: &GraphContext<B>,
         factory: &mut Factory<B>,
         _queue: QueueId,
-        world: &mut specs::World,
-        buffers: Vec<NodeBuffer<'a, B>>,
-        images: Vec<NodeImage<'a, B>>,
-        set_layouts: &[B::DescriptorSetLayout],
+        world: &specs::World,
+        buffers: Vec<NodeBuffer>,
+        images: Vec<NodeImage>,
+        set_layouts: &[Handle<DescriptorSetLayout<B>>],
     ) -> Result<Pipeline<B>, failure::Error> {
         assert!(buffers.is_empty());
         assert!(images.is_empty());
@@ -255,6 +255,7 @@ where
         let material_storage = world.read_resource::<asset::MaterialStorage<B>>();
 
         let num_mats = material_storage.0.len();
+        log::debug!("Num mats: {}", num_mats);
         let mut descriptor_pool = unsafe {
             factory.create_descriptor_pool(
                 frames + num_mats,
@@ -278,25 +279,27 @@ where
         let settings = Settings::from_world::<B>(world);
 
         let uniform_indirect_buffer = factory.create_buffer(
-            aux.align,
-            settings.uniform_indirect_buffer_frame_size() * frames as u64,
-            (
-                hal::buffer::Usage::UNIFORM | hal::buffer::Usage::INDIRECT,
-                MemoryUsageValue::Dynamic,
-            ),
+            BufferInfo {
+                size: settings.uniform_indirect_buffer_frame_size() * frames as u64,
+                usage: hal::buffer::Usage::UNIFORM | hal::buffer::Usage::INDIRECT,
+            },
+            MemoryUsageValue::Dynamic,
         )?;
         let transform_buffer = factory.create_buffer(
-            aux.align,
-            settings.transform_buffer_frame_size() * frames as u64,
-            (hal::buffer::Usage::VERTEX, MemoryUsageValue::Dynamic),
+            BufferInfo {
+                size: settings.transform_buffer_frame_size() * frames as u64,
+                usage: hal::buffer::Usage::VERTEX,
+            },
+            MemoryUsageValue::Dynamic,
         )?;
 
-        let texture_sampler = factory.create_sampler(Filter::Linear, WrapMode::Clamp)?;
+        let texture_sampler =
+            factory.create_sampler(SamplerInfo::new(Filter::Linear, WrapMode::Clamp))?;
 
         let mut frame_sets = Vec::with_capacity(frames);
         for index in 0..frames {
             unsafe {
-                let set = descriptor_pool.allocate_set(&set_layouts[0])?;
+                let set = descriptor_pool.allocate_set(&set_layouts[0].raw())?;
                 factory.write_descriptor_sets(vec![
                     hal::pso::DescriptorSetWrite {
                         set: &set,
@@ -325,14 +328,14 @@ where
 
         for mat_data in material_storage.0.iter() {
             unsafe {
-                let set = descriptor_pool.allocate_set(&set_layouts[1])?;
+                let set = descriptor_pool.allocate_set(&set_layouts[1].raw())?;
                 factory.write_descriptor_sets(vec![
                     hal::pso::DescriptorSetWrite {
                         set: &set,
                         binding: 0,
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Image(
-                            mat_data.albedo.image_view.raw(),
+                            mat_data.albedo.view().raw(),
                             hal::image::Layout::ShaderReadOnlyOptimal,
                         )),
                     },
@@ -341,7 +344,7 @@ where
                         binding: 1,
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Image(
-                            mat_data.normal.image_view.raw(),
+                            mat_data.normal.view().raw(),
                             hal::image::Layout::ShaderReadOnlyOptimal,
                         )),
                     },
@@ -350,7 +353,7 @@ where
                         binding: 2,
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Image(
-                            mat_data.metallic_roughness.image_view.raw(),
+                            mat_data.metallic_roughness.view().raw(),
                             hal::image::Layout::ShaderReadOnlyOptimal,
                         )),
                     },
@@ -359,7 +362,7 @@ where
                         binding: 3,
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Image(
-                            mat_data.ao.image_view.raw(),
+                            mat_data.ao.view().raw(),
                             hal::image::Layout::ShaderReadOnlyOptimal,
                         )),
                     },
@@ -390,7 +393,7 @@ where
         &mut self,
         factory: &Factory<B>,
         _queue: QueueId,
-        _set_layouts: &[B::DescriptorSetLayout],
+        _set_layouts: &[Handle<DescriptorSetLayout<B>>],
         index: usize,
         world: &specs::World,
     ) -> PrepareResult {
@@ -426,7 +429,7 @@ where
             .join()
             .map(|(_, cam, trans)| (cam, trans).into())
             .next()
-            .unwrap();
+            .expect("No active camera!");
         unsafe {
             factory
                 .upload_visible_buffer(
@@ -442,6 +445,7 @@ where
         };
 
         let instance_cache = world.read_resource::<systems::InstanceCache>();
+        // log::debug!("cache: {:?}", *instance_cache);
         let mesh_storage = world.read_resource::<asset::MeshStorage>();
         let primitive_storage = world.read_resource::<asset::PrimitiveStorage<B>>();
 
@@ -454,7 +458,23 @@ where
                 .unwrap();
 
             for dirty_mesh in instance_cache.dirty_mesh_indirects.iter() {
+                let primitives = &mesh_storage.0[*dirty_mesh].primitives;
+                log::trace!(
+                    "dirty indirect; mesh idx: {}; primitives: {:?}",
+                    dirty_mesh,
+                    *primitives
+                );
                 for prim_index in mesh_storage.0[*dirty_mesh].primitives.iter() {
+                    let command = DrawIndexedCommand {
+                        index_count: primitive_storage.0[*prim_index].mesh_data.len(),
+                        instance_count: instance_cache.mesh_instance_counts[*dirty_mesh],
+                        first_index: 0,
+                        vertex_offset: 0,
+                        first_instance: 0,
+                    };
+
+                    log::trace!("writing indirect draw: {:?}", command);
+
                     let start = self.settings.primitive_indirect_offset(*prim_index);
                     unsafe {
                         indirects_mapped
@@ -463,13 +483,7 @@ where
                                 start..(start + size_of::<DrawIndexedCommand>() as u64),
                             )
                             .unwrap()
-                            .write(&[DrawIndexedCommand {
-                                index_count: primitive_storage.0[*prim_index].mesh_data.len(),
-                                instance_count: instance_cache.mesh_instance_counts[*dirty_mesh],
-                                first_index: 0,
-                                vertex_offset: 0,
-                                first_instance: 0,
-                            }]);
+                            .write(&[command]);
                     }
                 }
             }
@@ -509,7 +523,7 @@ where
             }
         }
 
-        PrepareResult::DrawReuse
+        PrepareResult::DrawRecord
     }
 
     fn draw(
@@ -558,7 +572,7 @@ where
         }
     }
 
-    fn dispose(mut self, factory: &mut Factory<B>, _world: &mut specs::World) {
+    fn dispose(mut self, factory: &mut Factory<B>, _world: &specs::World) {
         unsafe {
             self.descriptor_pool.reset();
             factory.destroy_descriptor_pool(self.descriptor_pool);
