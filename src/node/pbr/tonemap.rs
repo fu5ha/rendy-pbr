@@ -1,12 +1,11 @@
 use rendy::{
     command::{QueueId, RenderPassEncoder},
     factory::Factory,
-    graph::{render::*, ImageAccess, NodeBuffer, NodeImage},
+    graph::{render::*, GraphContext, ImageAccess, NodeBuffer, NodeImage},
     hal::{pso::DescriptorPool, Device},
     resource::{
-        buffer::Buffer,
-        image::{Filter, ImageView, ViewKind, WrapMode},
-        sampler::Sampler,
+        Buffer, BufferInfo, DescriptorSetLayout, Escape, Filter, Handle, ImageView, ImageViewInfo,
+        Sampler, SamplerInfo, ViewKind, WrapMode,
     },
     shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
 };
@@ -93,11 +92,11 @@ pub struct PipelineDesc;
 
 #[derive(Debug)]
 pub struct Pipeline<B: hal::Backend> {
-    buffer: Buffer<B>,
+    buffer: Escape<Buffer<B>>,
     sets: Vec<B::DescriptorSet>,
     descriptor_pool: B::DescriptorPool,
-    image_sampler: Sampler<B>,
-    image_view: ImageView<B>,
+    image_sampler: Escape<Sampler<B>>,
+    image_view: Escape<ImageView<B>>,
     settings: Settings,
 }
 
@@ -109,7 +108,7 @@ where
 
     fn images(&self) -> Vec<ImageAccess> {
         vec![ImageAccess {
-            access: rendy::resource::image::Access::SHADER_READ,
+            access: hal::image::Access::SHADER_READ,
             usage: hal::image::Usage::SAMPLED,
             layout: hal::image::Layout::ShaderReadOnlyOptimal,
             stages: hal::pso::PipelineStage::FRAGMENT_SHADER,
@@ -124,15 +123,15 @@ where
         &self,
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
-        _world: &mut specs::World,
+        _world: &specs::World,
     ) -> hal::pso::GraphicsShaderSet<'a, B> {
         storage.clear();
 
         log::trace!("Load shader module '{:#?}'", *VERTEX);
-        storage.push(VERTEX.module(factory).unwrap());
+        storage.push(unsafe { VERTEX.module(factory).unwrap() });
 
         log::trace!("Load shader module '{:#?}'", *FRAGMENT);
-        storage.push(FRAGMENT.module(factory).unwrap());
+        storage.push(unsafe { FRAGMENT.module(factory).unwrap() });
 
         hal::pso::GraphicsShaderSet {
             vertex: hal::pso::EntryPoint {
@@ -184,12 +183,13 @@ where
 
     fn build<'a>(
         self,
+        ctx: &GraphContext<B>,
         factory: &mut Factory<B>,
         _queue: QueueId,
-        world: &mut specs::World,
-        buffers: Vec<NodeBuffer<'a, B>>,
-        images: Vec<NodeImage<'a, B>>,
-        set_layouts: &[B::DescriptorSetLayout],
+        world: &specs::World,
+        buffers: Vec<NodeBuffer>,
+        images: Vec<NodeImage>,
+        set_layouts: &[Handle<DescriptorSetLayout<B>>],
     ) -> Result<Pipeline<B>, failure::Error> {
         assert!(buffers.is_empty());
         assert!(images.len() == 1);
@@ -221,31 +221,37 @@ where
             )?
         };
 
-        let image_sampler = factory.create_sampler(Filter::Nearest, WrapMode::Clamp)?;
+        let image_sampler =
+            factory.create_sampler(SamplerInfo::new(Filter::Nearest, WrapMode::Clamp))?;
+
+        let image_handle = ctx
+            .get_image(images[0].id)
+            .ok_or(failure::format_err!("Tonemapper HDR image missing"))?;
 
         let image_view = factory
             .create_image_view(
-                images[0].image,
-                ViewKind::D2,
-                hal::format::Format::Rgba32Float,
-                hal::format::Swizzle::NO,
-                images[0].range.clone(),
+                image_handle.clone(),
+                ImageViewInfo {
+                    view_kind: ViewKind::D2,
+                    format: hal::format::Format::Rgba32Float,
+                    swizzle: hal::format::Swizzle::NO,
+                    range: images[0].range.clone(),
+                },
             )
             .expect("Could not create tonemapper input image view");
 
         let buffer = factory.create_buffer(
-            aux.align,
-            settings.buffer_frame_size() * aux.frames as u64,
-            (
-                hal::buffer::Usage::UNIFORM,
-                rendy::memory::MemoryUsageValue::Dynamic,
-            ),
+            BufferInfo {
+                size: settings.buffer_frame_size() * aux.frames as u64,
+                usage: hal::buffer::Usage::UNIFORM,
+            },
+            rendy::memory::MemoryUsageValue::Dynamic,
         )?;
 
         let mut sets = Vec::with_capacity(frames);
         for index in 0..frames {
             unsafe {
-                let set = descriptor_pool.allocate_set(&set_layouts[0])?;
+                let set = descriptor_pool.allocate_set(&set_layouts[0].raw())?;
                 factory.write_descriptor_sets(vec![
                     hal::pso::DescriptorSetWrite {
                         set: &set,
@@ -299,7 +305,7 @@ where
         &mut self,
         factory: &Factory<B>,
         _queue: QueueId,
-        _set_layouts: &[B::DescriptorSetLayout],
+        _set_layouts: &[Handle<DescriptorSetLayout<B>>],
         index: usize,
         world: &specs::World,
     ) -> PrepareResult {
@@ -338,7 +344,7 @@ where
         encoder.draw(0..3, 0..1);
     }
 
-    fn dispose(mut self, factory: &mut Factory<B>, _world: &mut specs::World) {
+    fn dispose(mut self, factory: &mut Factory<B>, _world: &specs::World) {
         unsafe {
             self.descriptor_pool.reset();
             factory.destroy_descriptor_pool(self.descriptor_pool);

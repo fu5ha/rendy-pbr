@@ -1,10 +1,10 @@
+use derivative::Derivative;
 use failure::format_err;
 use rendy::hal;
 use rendy::{
     command::QueueId,
     factory::{Factory, ImageState},
     mesh::PosNormTangTex,
-    resource::image::TextureUsage,
     texture::{
         image::{ImageTextureConfig, Repr},
         Texture, TextureBuilder,
@@ -41,7 +41,8 @@ pub struct Primitive<B: hal::Backend> {
     pub mat: MaterialHandle,
 }
 
-#[derive(Default)]
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
 pub struct PrimitiveStorage<B: hal::Backend>(pub Vec<Primitive<B>>);
 pub type PrimitiveHandle = usize;
 
@@ -181,9 +182,8 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                     .ok_or(format_err!("Material has no base color texture"))?
                     .texture(),
                 true,
-                factory.physical(),
             )?
-            .build(state, factory, TextureUsage)?;
+            .build(state, factory)?;
 
             let metallic_roughness = load_gltf_texture(
                 &base_dir,
@@ -192,9 +192,8 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                     .ok_or(format_err!("Material has no metallic_roughness texture"))?
                     .texture(),
                 false,
-                factory.physical(),
             )?
-            .build(state, factory, TextureUsage)?;
+            .build(state, factory)?;
 
             let normal = load_gltf_texture(
                 &base_dir,
@@ -203,9 +202,8 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                     .ok_or(format_err!("Material has no normal texture"))?
                     .texture(),
                 false,
-                factory.physical(),
             )?
-            .build(state, factory, TextureUsage)?;
+            .build(state, factory)?;
 
             let ao = load_gltf_texture(
                 &base_dir,
@@ -214,9 +212,8 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                     .ok_or(format_err!("Material has no occlusion texture"))?
                     .texture(),
                 false,
-                factory.physical(),
             )?
-            .build(state, factory, TextureUsage)?;
+            .build(state, factory)?;
 
             material_storage[mat_idx] = Some(MaterialData {
                 factors,
@@ -252,14 +249,12 @@ fn gltf_texture_uri(texture: gltf::Texture<'_>) -> String {
     }
 }
 
-fn load_gltf_texture<B, P>(
+fn load_gltf_texture<P>(
     base_dir: P,
     texture: gltf::Texture<'_>,
     srgb: bool,
-    physical: &dyn hal::PhysicalDevice<B>,
 ) -> Result<TextureBuilder<'static>, failure::Error>
 where
-    B: hal::Backend,
     P: AsRef<Path>,
 {
     match texture.source().source() {
@@ -268,13 +263,11 @@ where
             std::io::BufReader::new(File::open(base_dir.as_ref().join(uri))?),
             ImageTextureConfig {
                 repr: match srgb {
-                    true => Some(Repr::Srgb),
-                    false => Some(Repr::Unorm),
+                    true => Repr::Srgb,
+                    false => Repr::Unorm,
                 },
                 ..Default::default()
             },
-            TextureUsage,
-            physical,
         ),
     }
 }
