@@ -457,13 +457,7 @@ where
                 .map(factory.device(), indirect_offset..indirect_end)
                 .unwrap();
 
-            for dirty_mesh in instance_cache.dirty_mesh_indirects.iter() {
-                let primitives = &mesh_storage.0[*dirty_mesh].primitives;
-                log::trace!(
-                    "dirty indirect; mesh idx: {}; primitives: {:?}",
-                    dirty_mesh,
-                    *primitives
-                );
+            for dirty_mesh in instance_cache.dirty_mesh_indirects[index].iter() {
                 for prim_index in mesh_storage.0[*dirty_mesh].primitives.iter() {
                     let command = DrawIndexedCommand {
                         index_count: primitive_storage.0[*prim_index].mesh_data.len(),
@@ -472,8 +466,6 @@ where
                         vertex_offset: 0,
                         first_instance: 0,
                     };
-
-                    log::trace!("writing indirect draw: {:?}", command);
 
                     let start = self.settings.primitive_indirect_offset(*prim_index);
                     unsafe {
@@ -504,7 +496,7 @@ where
                 &mesh_component_storage,
                 &mesh_instance_storage,
                 &transforms,
-                &instance_cache.dirty_entities,
+                &instance_cache.dirty_entities[index],
             )
                 .join()
             {
