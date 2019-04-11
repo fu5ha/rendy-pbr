@@ -481,7 +481,7 @@ where
             }
         }
 
-        let mesh_instance_storage = world.read_storage::<systems::MeshInstance>();
+        let mesh_instance_storage = world.read_storage::<components::MeshInstance>();
         let mesh_component_storage = world.read_storage::<components::Mesh>();
 
         let transforms_offset = self.settings.transforms_offset(index as u64);

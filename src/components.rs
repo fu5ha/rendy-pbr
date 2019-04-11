@@ -4,6 +4,12 @@ use specs::prelude::*;
 
 pub struct Transform(pub nalgebra::Similarity3<f32>);
 
+impl Default for Transform {
+    fn default() -> Self {
+        Transform(nalgebra::Similarity3::identity())
+    }
+}
+
 impl Component for Transform {
     type Storage = FlaggedStorage<Self, VecStorage<Self>>;
 }
@@ -37,6 +43,7 @@ impl Component for Mesh {
     type Storage = FlaggedStorage<Self, DenseVecStorage<Self>>;
 }
 
+/// Indicates that an entity is the active camera.
 #[derive(Debug, Default)]
 pub struct ActiveCamera;
 
@@ -44,11 +51,16 @@ impl Component for ActiveCamera {
     type Storage = NullStorage<Self>;
 }
 
-#[derive(Debug, Default)]
-pub struct Helmet;
+pub type InstanceIndex = u16;
+/// The global number instance that this entity is of its attached mesh.
+/// This should only be added and changed automatically by the `InstanceCacheUpdateSystem`.
+pub struct MeshInstance {
+    pub mesh: asset::MeshHandle,
+    pub intance: InstanceIndex,
+}
 
-impl Component for Helmet {
-    type Storage = NullStorage<Self>;
+impl Component for MeshInstance {
+    type Storage = DenseVecStorage<Self>;
 }
 
 // pub struct Environment<B: hal::Backend> {

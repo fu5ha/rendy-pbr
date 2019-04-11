@@ -41,6 +41,5 @@ pub struct LightData {
 pub struct Aux {
     pub frames: usize,
     pub align: u64,
-    pub instance_array_size: (u8, u8, u8),
     pub tonemapper_args: tonemap::TonemapperArgs,
 }
