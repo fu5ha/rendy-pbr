@@ -31,6 +31,7 @@ mod systems;
 
 pub const CUBEMAP_RES: u32 = 512;
 pub const MAX_LIGHTS: usize = 32;
+pub const FRAMES_IN_FLIGHT: u32 = 3;
 
 #[cfg(feature = "dx12")]
 pub type Backend = rendy::dx12::Backend;
@@ -262,8 +263,8 @@ fn run() -> Result<(), failure::Error> {
             .into_pass(),
     );
 
-    let present_builder =
-        PresentNode::builder(&factory, surface, color).with_dependency(tonemap_pass);
+    pbr_graph_builder
+        .add_node(PresentNode::builder(&factory, surface, color).with_dependency(tonemap_pass));
 
     let instance_array_size = (1, 1, 1);
 
@@ -379,7 +380,7 @@ fn run() -> Result<(), failure::Error> {
     let num_meshes = mesh_storage.0.len();
     let num_materials = material_storage.0.len();
     let pbr_aux = node::pbr::Aux {
-        frames: present_builder.image_count() as usize,
+        frames: FRAMES_IN_FLIGHT as _,
         align,
         instance_array_size,
         tonemapper_args: node::pbr::tonemap::TonemapperArgs {
@@ -443,7 +444,9 @@ fn run() -> Result<(), failure::Error> {
         material_bitsets: vec![specs::BitSet::new(); num_materials],
     });
 
-    let mut pbr_graph = pbr_graph_builder.build(&mut factory, &mut families, &mut world)?;
+    let mut pbr_graph = pbr_graph_builder
+        .with_frames_in_flight(FRAMES_IN_FLIGHT)
+        .build(&mut factory, &mut families, &mut world)?;
 
     let camera_transform_system = {
         let mut transforms = world.write_storage::<components::Transform>();
