@@ -18,7 +18,7 @@ pub struct Camera {
 }
 
 impl Component for Camera {
-    type Storage = HashMapStorage<Self>;
+    type Storage = FlaggedStorage<Self, HashMapStorage<Self>>;
 }
 
 #[derive(Clone, Copy)]

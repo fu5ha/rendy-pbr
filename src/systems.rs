@@ -5,47 +5,6 @@ use specs::prelude::*;
 
 use std::collections::HashSet;
 
-pub struct CameraTransformSystem {
-    pub reader_id: ReaderId<ComponentEvent>,
-    pub dirty: BitSet,
-}
-
-impl<'a> System<'a> for CameraTransformSystem {
-    type SystemData = (
-        ReadStorage<'a, components::Camera>,
-        WriteStorage<'a, components::Transform>,
-    );
-
-    fn run(&mut self, (cameras, mut transforms): Self::SystemData) {
-        self.dirty.clear();
-        {
-            let events = transforms.channel().read(&mut self.reader_id);
-            for event in events {
-                match event {
-                    ComponentEvent::Modified(id) | ComponentEvent::Inserted(id) => {
-                        self.dirty.add(*id);
-                    }
-                    _ => {}
-                };
-            }
-        }
-        for (camera, transform, _) in (&cameras, &mut transforms, &self.dirty).join() {
-            transform.0 = Similarity3::face_towards(
-                &(camera.focus
-                    + (camera.dist
-                        * nalgebra::Vector3::new(
-                            camera.yaw.sin() * camera.pitch.cos(),
-                            camera.pitch.sin(),
-                            camera.yaw.cos() * camera.pitch.cos(),
-                        ))),
-                &camera.focus,
-                &nalgebra::Vector3::y(),
-                1.0,
-            );
-        }
-    }
-}
-
 pub struct InputSystem;
 
 impl<'a> System<'a> for InputSystem {
@@ -241,19 +200,19 @@ impl<'a> System<'a> for CameraInputSystem {
     type SystemData = (
         Read<'a, input::EventBucket>,
         Read<'a, input::InputState>,
-        ReadStorage<'a, components::Transform>,
+        WriteStorage<'a, components::Transform>,
         ReadStorage<'a, components::ActiveCamera>,
         WriteStorage<'a, components::Camera>,
     );
 
-    fn run(&mut self, (events, input, transforms, active_cameras, mut cameras): Self::SystemData) {
+    fn run(&mut self, (events, input, mut transforms, active_cameras, mut cameras): Self::SystemData) {
         use input::{
             MouseState, ROTATE_SENSITIVITY, TRANSLATE_SENSITIVITY, ZOOM_MOUSE_SENSITIVITY,
             ZOOM_SCROLL_SENSITIVITY,
         };
         use winit::{DeviceEvent, ElementState, ModifiersState, MouseScrollDelta};
         if let Some((_, transform, camera)) =
-            (&active_cameras, &transforms, &mut cameras).join().next()
+            (&active_cameras, &mut transforms, &mut cameras).join().next()
         {
             let mut input = (*input).clone();
             for event in events.0.iter() {
@@ -325,6 +284,21 @@ impl<'a> System<'a> for CameraInputSystem {
                     _ => (),
                 }
             }
+
+            let eye = camera.focus
+                + (camera.dist
+                    * nalgebra::Vector3::new(
+                        camera.yaw.sin() * camera.pitch.cos(),
+                        camera.pitch.sin(),
+                        camera.yaw.cos() * camera.pitch.cos(),
+                    ));
+
+            transform.0 = Similarity3::from_parts(
+                nalgebra::Translation::from(eye.coords.clone()),
+                // Invert direction for right handed
+                nalgebra::UnitQuaternion::face_towards(&(eye - camera.focus), &nalgebra::Vector3::y()),
+                1.0,
+            );
         }
     }
 }
@@ -338,15 +312,19 @@ impl Component for MeshInstance {
 
 #[derive(Default, Debug)]
 pub struct InstanceCache {
-    pub dirty_entities: BitSet,
-    pub dirty_mesh_indirects: HashSet<asset::MeshHandle>,
+    pub dirty_entities: Vec<BitSet>,
+    pub dirty_mesh_indirects: Vec<HashSet<asset::MeshHandle>>,
     pub mesh_instance_counts: Vec<u32>,
     pub material_bitsets: Vec<BitSet>,
 }
 
 pub struct InstanceCacheUpdateSystem<B> {
+    pub frames_in_flight: usize,
+    pub previous_frame: usize,
     pub mesh_reader_id: ReaderId<ComponentEvent>,
     pub transform_reader_id: ReaderId<ComponentEvent>,
+    pub dirty_entities_scratch: BitSet,
+    pub dirty_mesh_indirects_scratch: HashSet<asset::MeshHandle>,
     pub mesh_inserted: BitSet,
     pub mesh_deleted: BitSet,
     pub mesh_entity_bitsets: Vec<BitSet>,
@@ -376,14 +354,16 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
             transforms,
         ): Self::SystemData,
     ) {
-        cache.dirty_entities.clear();
-        cache.dirty_mesh_indirects.clear();
+        cache.dirty_entities[self.previous_frame].clear();
+        cache.dirty_mesh_indirects[self.previous_frame].clear();
+        self.dirty_entities_scratch.clear();
+        self.dirty_mesh_indirects_scratch.clear();
         {
             let events = meshes.channel().read(&mut self.mesh_reader_id);
             for event in events {
                 match event {
                     ComponentEvent::Modified(id) => {
-                        cache.dirty_entities.add(*id);
+                        self.dirty_entities_scratch.add(*id);
                     }
                     ComponentEvent::Inserted(id) => {
                         self.mesh_inserted.add(*id);
@@ -401,7 +381,7 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
                 match event {
                     ComponentEvent::Modified(id) => {
                         if mesh_mask.contains(*id) {
-                            cache.dirty_entities.add(*id);
+                            self.dirty_entities_scratch.add(*id);
                         }
                     }
                     _ => (),
@@ -409,20 +389,20 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
             }
         }
         for (entity, mesh, _) in (&entities, &meshes, &self.mesh_inserted).join() {
-            cache.mesh_instance_counts[mesh.0] += 1;
-            for primitive_idx in mesh_storage.0[mesh.0].primitives.iter() {
-                let primitive = &primitive_storage.0[*primitive_idx];
-                cache.material_bitsets[primitive.mat].add(entity.id());
-            }
-            self.mesh_entity_bitsets[mesh.0].add(entity.id());
             mesh_instances
                 .insert(
                     entity,
                     MeshInstance(cache.mesh_instance_counts[mesh.0] as InstanceIndex),
                 )
                 .unwrap();
-            cache.dirty_entities.add(entity.id());
-            cache.dirty_mesh_indirects.insert(mesh.0);
+            cache.mesh_instance_counts[mesh.0] += 1;
+            for primitive_idx in mesh_storage.0[mesh.0].primitives.iter() {
+                let primitive = &primitive_storage.0[*primitive_idx];
+                cache.material_bitsets[primitive.mat].add(entity.id());
+            }
+            self.mesh_entity_bitsets[mesh.0].add(entity.id());
+            self.dirty_entities_scratch.add(entity.id());
+            self.dirty_mesh_indirects_scratch.insert(mesh.0);
         }
         for (entity, mesh, _) in (&entities, &meshes, &self.mesh_deleted).join() {
             let deleted_idx = mesh_instances.get(entity).unwrap().0;
@@ -442,12 +422,17 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
             {
                 if mesh_instance.0 > deleted_idx {
                     mesh_instance.0 -= 1;
-                    cache.dirty_entities.add(entity.id());
+                    self.dirty_entities_scratch.add(entity.id());
                 }
             }
-            cache.dirty_mesh_indirects.insert(mesh.0);
+            self.dirty_mesh_indirects_scratch.insert(mesh.0);
+        }
+        for i in 0..self.frames_in_flight {
+            cache.dirty_entities[i] |= &self.dirty_entities_scratch;
+            cache.dirty_mesh_indirects[i].extend(&self.dirty_mesh_indirects_scratch);
         }
         self.mesh_inserted.clear();
         self.mesh_deleted.clear();
+        self.previous_frame = (self.previous_frame + 1) % self.frames_in_flight;
     }
 }

@@ -266,7 +266,7 @@ fn run() -> Result<(), failure::Error> {
     pbr_graph_builder
         .add_node(PresentNode::builder(&factory, surface, color).with_dependency(tonemap_pass));
 
-    let instance_array_size = (1, 1, 1);
+    let instance_array_size = (3, 3, 3);
 
     let mut anonymous_mesh_count: usize = 0;
     let mut mesh_handles = HashMap::new();
@@ -291,26 +291,29 @@ fn run() -> Result<(), failure::Error> {
         let scene = gltf.scenes().next().unwrap();
 
         for node in scene.nodes() {
-            if let Some(mesh) = node.mesh() {
-                use gltf::scene::Transform;
-                let node_transform = match node.transform() {
-                    Transform::Matrix { .. } => unimplemented!(),
-                    Transform::Decomposed {
-                        translation,
-                        rotation,
-                        scale,
-                    } => nalgebra::Similarity3::from_parts(
+            use gltf::scene::Transform;
+            let node_transform = match node.transform() {
+                Transform::Matrix { .. } => unimplemented!(),
+                Transform::Decomposed {
+                    translation,
+                    rotation,
+                    scale,
+                } => {
+                    log::debug!("rotation: {:?}", rotation);
+                    nalgebra::Similarity3::from_parts(
                         nalgebra::Translation3::new(translation[0], translation[1], translation[2]),
                         nalgebra::UnitQuaternion::from_quaternion(nalgebra::Quaternion::new(
+                            rotation[3],
                             rotation[0],
                             rotation[1],
                             rotation[2],
-                            rotation[3],
                         )),
                         scale.iter().sum::<f32>() / 3.0,
-                    ),
-                };
+                    )
+                }
+            };
 
+            if let Some(mesh) = node.mesh() {
                 let (transforms, max_instances) = match node.name() {
                     Some("SciFiHelmet") => {
                         let transforms = generate_instances(instance_array_size)
@@ -438,8 +441,8 @@ fn run() -> Result<(), failure::Error> {
     world.add_resource(primitive_storage);
     world.add_resource(mesh_storage);
     world.add_resource(systems::InstanceCache {
-        dirty_entities: specs::BitSet::new(),
-        dirty_mesh_indirects: HashSet::new(),
+        dirty_entities: vec![specs::BitSet::new(); FRAMES_IN_FLIGHT as _],
+        dirty_mesh_indirects: vec![HashSet::new(); FRAMES_IN_FLIGHT as _],
         mesh_instance_counts: vec![0; num_meshes],
         material_bitsets: vec![specs::BitSet::new(); num_materials],
     });
@@ -447,14 +450,6 @@ fn run() -> Result<(), failure::Error> {
     let mut pbr_graph = pbr_graph_builder
         .with_frames_in_flight(FRAMES_IN_FLIGHT)
         .build(&mut factory, &mut families, &mut world)?;
-
-    let camera_transform_system = {
-        let mut transforms = world.write_storage::<components::Transform>();
-        (systems::CameraTransformSystem {
-            reader_id: transforms.register_reader(),
-            dirty: BitSet::new(),
-        })
-    };
 
     let pbr_aux_input_system = systems::PbrAuxInputSystem {
         helmet_mesh: 0 as asset::MeshHandle,
@@ -464,10 +459,14 @@ fn run() -> Result<(), failure::Error> {
         let mut mesh_storage = world.write_storage::<components::Mesh>();
 
         systems::InstanceCacheUpdateSystem {
+            frames_in_flight: FRAMES_IN_FLIGHT as usize,
+            previous_frame: FRAMES_IN_FLIGHT as usize - 1,
             transform_reader_id: world
                 .write_storage::<components::Transform>()
                 .register_reader(),
             mesh_reader_id: mesh_storage.register_reader(),
+            dirty_entities_scratch: specs::BitSet::new(),
+            dirty_mesh_indirects_scratch: HashSet::new(),
             mesh_inserted: mesh_storage.mask().clone(),
             mesh_deleted: BitSet::new(),
             mesh_entity_bitsets: vec![BitSet::new(); num_meshes],
@@ -477,11 +476,6 @@ fn run() -> Result<(), failure::Error> {
 
     let mut dispatcher = DispatcherBuilder::new()
         .with(systems::CameraInputSystem, "camera_input_system", &[])
-        .with(
-            camera_transform_system,
-            "camera_transform_system",
-            &["camera_input_system"],
-        )
         .with(pbr_aux_input_system, "pbr_aux_input_system", &[])
         .with(
             instance_cache_update_system,
