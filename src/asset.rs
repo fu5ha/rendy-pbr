@@ -182,8 +182,9 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                     .ok_or(format_err!("Material has no base color texture"))?
                     .texture(),
                 true,
-            )?
-            .build(state, factory)?;
+            )?;
+            log::debug!("{:?}", albedo);
+            let albedo = albedo.build(state, factory)?;
 
             let metallic_roughness = load_gltf_texture(
                 &base_dir,
@@ -259,15 +260,19 @@ where
 {
     match texture.source().source() {
         gltf::image::Source::View { .. } => unimplemented!(),
-        gltf::image::Source::Uri { uri, .. } => rendy::texture::image::load_from_image(
-            std::io::BufReader::new(File::open(base_dir.as_ref().join(uri))?),
-            ImageTextureConfig {
-                repr: match srgb {
-                    true => Repr::Srgb,
-                    false => Repr::Unorm,
+        gltf::image::Source::Uri { uri, .. } => {
+            let path = base_dir.as_ref().join(uri);
+            log::trace!("Loading image: {:#?}", path);
+            rendy::texture::image::load_from_image(
+                std::io::BufReader::new(File::open(path)?),
+                ImageTextureConfig {
+                    repr: match srgb {
+                        true => Repr::Srgb,
+                        false => Repr::Unorm,
+                    },
+                    ..Default::default()
                 },
-                ..Default::default()
-            },
-        ),
+            )
+        }
     }
 }
