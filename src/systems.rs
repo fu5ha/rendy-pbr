@@ -26,35 +26,6 @@ pub struct PbrAuxInputSystem {
     pub helmet_mesh: asset::MeshHandle,
 }
 
-fn try_add_instance_array_size_x(ia_size: (u8, u8, u8), max: u16) -> (u8, u8, u8) {
-    let mut n_ia_size = ia_size;
-    n_ia_size.0 = n_ia_size.0.checked_add(1).unwrap_or(u8::max_value());
-    if n_ia_size.0 as u16 * n_ia_size.1 as u16 * n_ia_size.2 as u16 <= max {
-        n_ia_size
-    } else {
-        ia_size
-    }
-}
-
-fn try_add_instance_array_size_y(ia_size: (u8, u8, u8), max: u16) -> (u8, u8, u8) {
-    let mut n_ia_size = ia_size;
-    n_ia_size.1 = n_ia_size.1.checked_add(1).unwrap_or(u8::max_value());
-    if n_ia_size.0 as u16 * n_ia_size.1 as u16 * n_ia_size.2 as u16 <= max {
-        n_ia_size
-    } else {
-        ia_size
-    }
-}
-
-fn try_add_instance_array_size_z(ia_size: (u8, u8, u8), max: u16) -> (u8, u8, u8) {
-    let mut n_ia_size = ia_size;
-    n_ia_size.2 = n_ia_size.2.checked_add(1).unwrap_or(u8::max_value());
-    if n_ia_size.0 as u16 * n_ia_size.1 as u16 * n_ia_size.2 as u16 <= max {
-        n_ia_size
-    } else {
-        ia_size
-    }
-}
 
 impl<'a> System<'a> for PbrAuxInputSystem {
     type SystemData = (
@@ -62,9 +33,10 @@ impl<'a> System<'a> for PbrAuxInputSystem {
         Read<'a, input::InputState>,
         Read<'a, asset::MeshStorage>,
         Write<'a, node::pbr::Aux>,
+        Write<'a, HelmetArraySize>,
     );
 
-    fn run(&mut self, (events, input, mesh_storage, mut aux): Self::SystemData) {
+    fn run(&mut self, (events, input, mesh_storage, mut aux, mut helmet_array_size): Self::SystemData) {
         use input::MouseState;
         use winit::{ElementState, ModifiersState, VirtualKeyCode, WindowEvent};
 
@@ -100,54 +72,42 @@ impl<'a> System<'a> for PbrAuxInputSystem {
                                         ElementState::Pressed,
                                         ModifiersState { shift: false, .. },
                                     ) => {
-                                        aux.instance_array_size = try_add_instance_array_size_x(
-                                            aux.instance_array_size,
-                                            mesh.max_instances,
-                                        );
+                                        helmet_array_size.try_add_x(mesh.max_instances);
                                     }
                                     (
                                         VirtualKeyCode::X,
                                         ElementState::Pressed,
                                         ModifiersState { shift: true, .. },
                                     ) => {
-                                        aux.instance_array_size.0 =
-                                            (aux.instance_array_size.0 - 1).max(1);
+                                        helmet_array_size.try_sub_x();
                                     }
                                     (
                                         VirtualKeyCode::Y,
                                         ElementState::Pressed,
                                         ModifiersState { shift: false, .. },
                                     ) => {
-                                        aux.instance_array_size = try_add_instance_array_size_y(
-                                            aux.instance_array_size,
-                                            mesh.max_instances,
-                                        );
+                                        helmet_array_size.try_add_y(mesh.max_instances);
                                     }
                                     (
                                         VirtualKeyCode::Y,
                                         ElementState::Pressed,
                                         ModifiersState { shift: true, .. },
                                     ) => {
-                                        aux.instance_array_size.1 =
-                                            (aux.instance_array_size.1 - 1).max(1);
+                                        helmet_array_size.try_sub_y();
                                     }
                                     (
                                         VirtualKeyCode::Z,
                                         ElementState::Pressed,
                                         ModifiersState { shift: false, .. },
                                     ) => {
-                                        aux.instance_array_size = try_add_instance_array_size_z(
-                                            aux.instance_array_size,
-                                            mesh.max_instances,
-                                        );
+                                        helmet_array_size.try_add_z(mesh.max_instances);
                                     }
                                     (
                                         VirtualKeyCode::Z,
                                         ElementState::Pressed,
                                         ModifiersState { shift: true, .. },
                                     ) => {
-                                        aux.instance_array_size.2 =
-                                            (aux.instance_array_size.2 - 1).max(1);
+                                        helmet_array_size.try_sub_z();
                                     }
                                     // Tonemapper controls
                                     (
@@ -303,11 +263,132 @@ impl<'a> System<'a> for CameraInputSystem {
     }
 }
 
-pub type InstanceIndex = u16;
-pub struct MeshInstance(pub InstanceIndex);
+#[derive(Default)]
+pub struct HelmetArrayEntities(pub Vec<Entity>);
 
-impl Component for MeshInstance {
-    type Storage = DenseVecStorage<Self>;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct HelmetArraySize {
+    pub x: u8,
+    pub y: u8,
+    pub z: u8
+}
+
+impl HelmetArraySize {
+    pub fn size(&self) -> usize {
+        self.x as usize * self.y as usize * self.z as usize
+    }
+
+    pub fn generate_transforms(&self) -> Vec<nalgebra::Similarity3<f32>> {
+        let x_size = 3.0;
+        let y_size = 4.0;
+        let z_size = 4.0;
+        let mut transforms = Vec::with_capacity(self.size());
+        for x in 0..self.x {
+            for y in 0..self.y {
+                for z in 0..self.z {
+                    transforms.push(nalgebra::Similarity3::from_parts(
+                        nalgebra::Translation3::new(
+                            (x as f32 * x_size) - (x_size * (self.x - 1) as f32 * 0.5),
+                            (y as f32 * y_size) - (y_size * (self.y - 1) as f32 * 0.5),
+                            (z as f32 * z_size) - (z_size * (self.z - 1) as f32 * 0.5),
+                        ),
+                        nalgebra::UnitQuaternion::identity(),
+                        1.0,
+                    ));
+                }
+            }
+        }
+        transforms
+    }
+
+    pub fn try_add_x(&mut self, max: u16) {
+        let mut n_size = *self;
+        n_size.x = n_size.x.checked_add(1).unwrap_or(u8::max_value());
+        if n_size.size() <= max as _ {
+            *self = n_size
+        }
+    }
+
+    pub fn try_add_y(&mut self, max: u16) {
+        let mut n_size = *self;
+        n_size.y = n_size.y.checked_add(1).unwrap_or(u8::max_value());
+        if n_size.size() <= max as _ {
+            *self = n_size
+        }
+    }
+
+    pub fn try_add_z(&mut self, max: u16) {
+        let mut n_size = *self;
+        n_size.z = n_size.z.checked_add(1).unwrap_or(u8::max_value());
+        if n_size.size() <= max as _ {
+            *self = n_size
+        }
+    }
+
+    pub fn try_sub_x(&mut self) {
+        self.x = (self.x - 1).max(1);
+    }
+
+    pub fn try_sub_y(&mut self) {
+        self.y = (self.y - 1).max(1);
+    }
+
+    pub fn try_sub_z(&mut self) {
+        self.z = (self.z - 1).max(1);
+    }
+}
+
+pub struct HelmetArraySizeUpdateSystem {
+    pub curr_size: HelmetArraySize,
+    pub helmet_mesh: asset::MeshHandle,
+}
+
+impl<'a> System<'a> for HelmetArraySizeUpdateSystem {
+    type SystemData = (
+        Entities<'a>,
+        Write<'a, HelmetArrayEntities>,
+        Read<'a, HelmetArraySize>,
+        WriteStorage<'a, components::Transform>,
+        WriteStorage<'a, components::Mesh>,
+    );
+
+    fn run(
+        &mut self,
+        (
+            entities,
+            mut helmet_array_entities,
+            helmet_array_size,
+            mut transforms,
+            mut meshes,
+        ): Self::SystemData
+    ) {
+        if *helmet_array_size != self.curr_size {
+            while helmet_array_entities.0.len() < helmet_array_size.size() {
+                helmet_array_entities.0.push(entities.create());
+            }
+            while helmet_array_entities.0.len() > helmet_array_size.size() {
+                let entity = helmet_array_entities.0.pop().unwrap();
+                log::debug!("delete entity: {:?}", entity);
+                entities.delete(entity).unwrap();
+                meshes.remove(entity);
+                transforms.remove(entity);
+            }
+            let new_helmet_transforms = helmet_array_size.generate_transforms();
+            for (transform, entity) in new_helmet_transforms.into_iter().zip(helmet_array_entities.0.iter()) {
+                if let Ok(entry) = transforms.entry(*entity) {
+                    let entity_transform = entry.or_insert(Default::default());
+                    entity_transform.0 = transform
+                } else {
+                    panic!("lul");
+                }
+                if let Ok(entry) = meshes.entry(*entity) {
+                    entry.or_insert(components::Mesh(self.helmet_mesh));
+                } else {
+                    panic!("lul");
+                }
+            }
+        }
+    }
 }
 
 #[derive(Default, Debug)]
@@ -337,7 +418,7 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
         Write<'a, InstanceCache>,
         Read<'a, asset::MeshStorage>,
         Read<'a, asset::PrimitiveStorage<B>>,
-        WriteStorage<'a, MeshInstance>,
+        WriteStorage<'a, components::MeshInstance>,
         ReadStorage<'a, components::Mesh>,
         ReadStorage<'a, components::Transform>,
     );
@@ -363,7 +444,7 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
             for event in events {
                 match event {
                     ComponentEvent::Modified(id) => {
-                        self.dirty_entities_scratch.add(*id);
+                        panic!("Changing mesh not supported.. delete entity and make a new one");
                     }
                     ComponentEvent::Inserted(id) => {
                         self.mesh_inserted.add(*id);
@@ -392,10 +473,11 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
             mesh_instances
                 .insert(
                     entity,
-                    MeshInstance(cache.mesh_instance_counts[mesh.0] as InstanceIndex),
+                    components::MeshInstance(cache.mesh_instance_counts[mesh.0] as components::InstanceIndex),
                 )
                 .unwrap();
             cache.mesh_instance_counts[mesh.0] += 1;
+            log::debug!("Mesh instance count: {}", cache.mesh_instance_counts[mesh.0]);
             for primitive_idx in mesh_storage.0[mesh.0].primitives.iter() {
                 let primitive = &primitive_storage.0[*primitive_idx];
                 cache.material_bitsets[primitive.mat].add(entity.id());
@@ -409,6 +491,7 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
             mesh_instances.remove(entity);
             self.mesh_entity_bitsets[mesh.0].remove(entity.id());
             cache.mesh_instance_counts[mesh.0] -= 1;
+            log::debug!("Mesh instance count: {}", cache.mesh_instance_counts[mesh.0]);
             for primitive_idx in mesh_storage.0[mesh.0].primitives.iter() {
                 let primitive = &primitive_storage.0[*primitive_idx];
                 cache.material_bitsets[primitive.mat].remove(entity.id());

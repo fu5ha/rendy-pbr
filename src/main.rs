@@ -45,29 +45,6 @@ pub type Backend = rendy::vulkan::Backend;
 #[cfg(feature = "empty")]
 pub type Backend = rendy::empty::Backend;
 
-pub fn generate_instances(size: (u8, u8, u8)) -> Vec<nalgebra::Similarity3<f32>> {
-    let x_size = 3.0;
-    let y_size = 4.0;
-    let z_size = 4.0;
-    let mut instances = Vec::with_capacity(size.0 as usize * size.1 as usize * size.2 as usize);
-    for x in 0..size.0 {
-        for y in 0..size.1 {
-            for z in 0..size.2 {
-                instances.push(nalgebra::Similarity3::from_parts(
-                    nalgebra::Translation3::new(
-                        (x as f32 * x_size) - (x_size * (size.0 - 1) as f32 * 0.5),
-                        (y as f32 * y_size) - (y_size * (size.1 - 1) as f32 * 0.5),
-                        (z as f32 * z_size) - (z_size * (size.2 - 1) as f32 * 0.5),
-                    ),
-                    nalgebra::UnitQuaternion::identity(),
-                    1.0,
-                ));
-            }
-        }
-    }
-    instances
-}
-
 #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
 fn main() {
     env_logger::Builder::from_default_env()
@@ -91,7 +68,7 @@ fn run() -> Result<(), failure::Error> {
     world.register::<components::Camera>();
     world.register::<components::ActiveCamera>();
     world.register::<components::Light>();
-    world.register::<systems::MeshInstance>();
+    world.register::<components::MeshInstance>();
 
     let config: Config = Default::default();
 
@@ -266,10 +243,8 @@ fn run() -> Result<(), failure::Error> {
     pbr_graph_builder
         .add_node(PresentNode::builder(&factory, surface, color).with_dependency(tonemap_pass));
 
-    let instance_array_size = (3, 3, 3);
-
     let mut anonymous_mesh_count: usize = 0;
-    let mut mesh_handles = HashMap::new();
+    let mut mesh_handle_map = asset::MeshHandleMap(HashMap::new());
 
     let (material_storage, primitive_storage, mesh_storage) = {
         let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/gltf/helmet/");
@@ -278,14 +253,14 @@ fn run() -> Result<(), failure::Error> {
         let gltf = gltf::Gltf::from_reader(reader)?;
 
         let gltf_buffers = asset::GltfBuffers::load_from_gltf(&base_path, &gltf)?;
-        let mut material_storage = Vec::with_capacity(gltf.meshes().len());
+        let mut mesh_storage = Vec::with_capacity(gltf.meshes().len());
         for _ in 0..gltf.meshes().len() {
-            material_storage.push(None);
+            mesh_storage.push(None);
         }
         let mut primitive_storage = Vec::new();
-        let mut mesh_storage = Vec::with_capacity(gltf.materials().len());
+        let mut material_storage = Vec::with_capacity(gltf.materials().len());
         for _ in 0..gltf.materials().len() {
-            mesh_storage.push(None);
+            material_storage.push(None);
         }
 
         let scene = gltf.scenes().next().unwrap();
@@ -314,15 +289,11 @@ fn run() -> Result<(), failure::Error> {
             };
 
             if let Some(mesh) = node.mesh() {
-                let (transforms, max_instances) = match node.name() {
+                let max_instances = match node.name() {
                     Some("SciFiHelmet") => {
-                        let transforms = generate_instances(instance_array_size)
-                            .into_iter()
-                            .map(|t| node_transform * t)
-                            .collect::<Vec<_>>();
-                        (transforms, 1024)
+                        1024
                     }
-                    _ => (vec![node_transform], 1),
+                    _ => 1,
                 };
 
                 let mesh_handle = asset::load_gltf_mesh(
@@ -346,16 +317,8 @@ fn run() -> Result<(), failure::Error> {
                     String::from,
                 );
 
-                if let Some(dupe_name) = mesh_handles.insert(name, mesh_handle) {
+                if let Some(dupe_name) = mesh_handle_map.0.insert(name, mesh_handle) {
                     failure::bail!("Multiple meshes with the same name: {}", dupe_name);
-                }
-
-                for transform in transforms {
-                    world
-                        .create_entity()
-                        .with(components::Mesh(mesh_handle))
-                        .with(components::Transform(transform))
-                        .build();
                 }
             }
         }
@@ -385,7 +348,6 @@ fn run() -> Result<(), failure::Error> {
     let pbr_aux = node::pbr::Aux {
         frames: FRAMES_IN_FLIGHT as _,
         align,
-        instance_array_size,
         tonemapper_args: node::pbr::tonemap::TonemapperArgs {
             exposure: 2.5,
             curve: 0,
@@ -440,6 +402,9 @@ fn run() -> Result<(), failure::Error> {
     world.add_resource(material_storage);
     world.add_resource(primitive_storage);
     world.add_resource(mesh_storage);
+    world.add_resource(mesh_handle_map);
+    world.add_resource(systems::HelmetArraySize{ x: 3, y: 3, z: 3 });
+    world.add_resource(systems::HelmetArrayEntities(Vec::new()));
     world.add_resource(systems::InstanceCache {
         dirty_entities: vec![specs::BitSet::new(); FRAMES_IN_FLIGHT as _],
         dirty_mesh_indirects: vec![HashSet::new(); FRAMES_IN_FLIGHT as _],
@@ -476,11 +441,17 @@ fn run() -> Result<(), failure::Error> {
 
     let mut dispatcher = DispatcherBuilder::new()
         .with(systems::CameraInputSystem, "camera_input_system", &[])
-        .with(pbr_aux_input_system, "pbr_aux_input_system", &[])
+        .with(systems::PbrAuxInputSystem {
+            helmet_mesh: 0 as asset::MeshHandle,
+        }, "pbr_aux_input_system", &[])
+        .with(systems::HelmetArraySizeUpdateSystem {
+            curr_size: Default::default(),
+            helmet_mesh: 0 as asset::MeshHandle,
+        }, "helmet_array_size_update_system", &["pbr_aux_input_system"])
         .with(
             instance_cache_update_system,
             "instance_cache_update_system",
-            &["pbr_aux_input_system"],
+            &["helmet_array_size_update_system"],
         )
         .with(
             systems::InputSystem,
@@ -517,9 +488,9 @@ fn run() -> Result<(), failure::Error> {
 
             dispatcher.dispatch(&mut world.res);
 
-            pbr_graph.run(&mut factory, &mut families, &mut world);
-
             world.maintain();
+
+            pbr_graph.run(&mut factory, &mut families, &mut world);
 
             let elapsed = checkpoint.elapsed();
 
