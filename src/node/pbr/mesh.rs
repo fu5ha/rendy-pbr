@@ -402,7 +402,7 @@ where
         }
 
         use rendy::memory::Write;
-        use specs::prelude::*;
+        use specs::{prelude::*, storage::UnprotectedStorage};
 
         let lights = world.read_storage::<components::Light>();
         let transforms = world.read_storage::<components::Transform>();
@@ -481,8 +481,8 @@ where
             }
         }
 
-        let mesh_instance_storage = world.read_storage::<components::MeshInstance>();
-        let mesh_component_storage = world.read_storage::<components::Mesh>();
+        let mesh_instance_storage = world.read_resource::<systems::MeshInstanceStorage>();
+        let entities = world.entities();
 
         let transforms_offset = self.settings.transforms_offset(index as u64);
         let transforms_end = transforms_offset + self.settings.transform_size();
@@ -492,17 +492,17 @@ where
                 .map(factory.device(), transforms_offset..transforms_end)
                 .unwrap();
 
-            for (mesh, mesh_instance, transform, _) in (
-                &mesh_component_storage,
-                &mesh_instance_storage,
+            for (entity, transform, _) in (
+                &entities,
                 &transforms,
                 &instance_cache.dirty_entities[index],
             )
                 .join()
             {
+                let systems::MeshInstance { mesh, instance } = unsafe { mesh_instance_storage.0.get(entity.id()) };
                 let start = self
                     .settings
-                    .instance_transform_offset(mesh.0, mesh_instance.0);
+                    .instance_transform_offset(*mesh, *instance);
                 unsafe {
                     transforms_mapped
                         .write(

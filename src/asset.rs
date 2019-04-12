@@ -110,14 +110,17 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
     max_instances: u16,
     base_dir: P,
     buffers: &GltfBuffers,
+    base_mesh_index: usize,
+    base_material_index: usize,
     material_storage: &mut Vec<Option<MaterialData<B>>>,
     primitive_storage: &mut Vec<Option<Primitive<B>>>,
     mesh_storage: &mut Vec<Option<Mesh>>,
     factory: &mut Factory<B>,
     queue: QueueId,
 ) -> Result<MeshHandle, failure::Error> {
-    if let Some(_) = mesh_storage[mesh.index()] {
-        Ok(mesh.index() as MeshHandle)
+    let mesh_idx = base_mesh_index + mesh.index();
+    if let Some(_) = mesh_storage[mesh_idx] {
+        Ok(mesh_idx as MeshHandle)
     } else {
         let mut primitives = Vec::new();
 
@@ -161,7 +164,7 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                 .build(queue, factory)?;
 
             let material = primitive.material();
-            let mat_idx = material
+            let mat_idx = base_material_index + material
                 .index()
                 .ok_or(format_err!("Default material unimplemented"))?;
 
@@ -188,9 +191,8 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                         .ok_or(format_err!("Material has no base color texture"))?
                         .texture(),
                     true,
-                )?;
-                log::debug!("{:?}", albedo);
-                let albedo = albedo.build(state, factory)?;
+                )?
+                .build(state, factory)?;
 
                 let metallic_roughness = load_gltf_texture(
                     &base_dir,
@@ -233,19 +235,19 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
 
             primitive_storage.push(Some(Primitive {
                 mesh_data: prim_mesh,
-                mesh_handle: mesh.index(),
+                mesh_handle: mesh_idx,
                 mat: mat_idx as MaterialHandle,
             }));
 
             primitives.push(primitive_storage.len() - 1);
         }
 
-        mesh_storage[mesh.index()] = Some(Mesh {
+        mesh_storage[mesh_idx] = Some(Mesh {
             primitives,
             max_instances,
         });
 
-        Ok(mesh.index() as MeshHandle)
+        Ok(mesh_idx as MeshHandle)
     }
 }
 

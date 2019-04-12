@@ -58,6 +58,42 @@ fn main() {
     }
 }
 
+fn process_node(node: gltf::Node, world: &mut specs::World, base_mesh_index: usize) {
+    if let Some(mesh) = node.mesh() {
+        use gltf::scene::Transform;
+        let node_transform = match node.transform() {
+            Transform::Matrix { .. } => unimplemented!(),
+            Transform::Decomposed {
+                translation,
+                rotation,
+                scale,
+            } => {
+                nalgebra::Similarity3::from_parts(
+                    nalgebra::Translation3::new(translation[0], translation[1], translation[2]),
+                    nalgebra::UnitQuaternion::from_quaternion(nalgebra::Quaternion::new(
+                        rotation[3],
+                        rotation[0],
+                        rotation[1],
+                        rotation[2],
+                    )),
+                    scale.iter().sum::<f32>() / 3.0,
+                )
+            }
+        };
+
+        log::debug!("Create entity with transform: {}", node_transform);
+
+        world.create_entity()
+            .with(components::Transform(node_transform))
+            .with(components::Mesh(base_mesh_index + mesh.index()))
+        .build();
+    }
+
+    for node in node.children() {
+        process_node(node, world, base_mesh_index);
+    }
+}
+
 #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
 fn run() -> Result<(), failure::Error> {
     // Initialize specs and register components
@@ -68,7 +104,6 @@ fn run() -> Result<(), failure::Error> {
     world.register::<components::Camera>();
     world.register::<components::ActiveCamera>();
     world.register::<components::Light>();
-    world.register::<components::MeshInstance>();
 
     let config: Config = Default::default();
 
@@ -243,85 +278,56 @@ fn run() -> Result<(), failure::Error> {
     pbr_graph_builder
         .add_node(PresentNode::builder(&factory, surface, color).with_dependency(tonemap_pass));
 
-    let mut anonymous_mesh_count: usize = 0;
-    let mut mesh_handle_map = asset::MeshHandleMap(HashMap::new());
-
     let (material_storage, primitive_storage, mesh_storage) = {
-        let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/gltf/helmet/");
-        let file = File::open(base_path.join("SciFiHelmet.gltf"))?;
-        let reader = std::io::BufReader::new(file);
-        let gltf = gltf::Gltf::from_reader(reader)?;
+        let paths = vec![
+            ("assets/gltf/SciFiHelmet", "SciFiHelmet.gltf"),
+            ("assets/gltf/FlightHelmet", "FlightHelmet.gltf"),
+            ("assets/gltf/Corset", "Corset.gltf")
+        ];
 
-        let gltf_buffers = asset::GltfBuffers::load_from_gltf(&base_path, &gltf)?;
-        let mut mesh_storage = Vec::with_capacity(gltf.meshes().len());
-        for _ in 0..gltf.meshes().len() {
-            mesh_storage.push(None);
-        }
+        let mut mesh_storage = Vec::new();
         let mut primitive_storage = Vec::new();
-        let mut material_storage = Vec::with_capacity(gltf.materials().len());
-        for _ in 0..gltf.materials().len() {
-            material_storage.push(None);
-        }
+        let mut material_storage = Vec::new();
+        for path in paths {
+            let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path.0);
+            let file = File::open(base_path.join(path.1))?;
+            let reader = std::io::BufReader::new(file);
+            let gltf = gltf::Gltf::from_reader(reader)?;
 
-        let scene = gltf.scenes().next().unwrap();
+            let gltf_buffers = asset::GltfBuffers::load_from_gltf(&base_path, &gltf)?;
 
-        for node in scene.nodes() {
-            use gltf::scene::Transform;
-            let node_transform = match node.transform() {
-                Transform::Matrix { .. } => unimplemented!(),
-                Transform::Decomposed {
-                    translation,
-                    rotation,
-                    scale,
-                } => {
-                    log::debug!("rotation: {:?}", rotation);
-                    nalgebra::Similarity3::from_parts(
-                        nalgebra::Translation3::new(translation[0], translation[1], translation[2]),
-                        nalgebra::UnitQuaternion::from_quaternion(nalgebra::Quaternion::new(
-                            rotation[3],
-                            rotation[0],
-                            rotation[1],
-                            rotation[2],
-                        )),
-                        scale.iter().sum::<f32>() / 3.0,
-                    )
-                }
-            };
+            let base_mesh_index = mesh_storage.len();
+            let base_material_index = material_storage.len();
+            for _ in 0..gltf.meshes().len() {
+                mesh_storage.push(None);
+            }
+            for _ in 0..gltf.materials().len() {
+                material_storage.push(None);
+            }
 
-            if let Some(mesh) = node.mesh() {
-                let max_instances = match node.name() {
-                    Some("SciFiHelmet") => {
-                        1024
-                    }
-                    _ => 1,
-                };
-
-                let mesh_handle = asset::load_gltf_mesh(
+            for mesh in gltf.meshes() {
+                asset::load_gltf_mesh(
                     &mesh,
-                    max_instances,
+                    256,
                     &base_path,
                     &gltf_buffers,
+                    base_mesh_index,
+                    base_material_index,
                     &mut material_storage,
                     &mut primitive_storage,
                     &mut mesh_storage,
                     &mut factory,
                     queue,
                 )?;
+            }
 
-                let name = node.name().map_or_else(
-                    || {
-                        let name = format!("__anonymous_{}", anonymous_mesh_count);
-                        anonymous_mesh_count += 1;
-                        name
-                    },
-                    String::from,
-                );
+            let scene = gltf.scenes().next().unwrap();
 
-                if let Some(dupe_name) = mesh_handle_map.0.insert(name, mesh_handle) {
-                    failure::bail!("Multiple meshes with the same name: {}", dupe_name);
-                }
+            for node in scene.nodes() {
+                process_node(node, &mut world, base_mesh_index);
             }
         }
+
         let material_storage = asset::MaterialStorage(
             material_storage
                 .into_iter()
@@ -402,9 +408,9 @@ fn run() -> Result<(), failure::Error> {
     world.add_resource(material_storage);
     world.add_resource(primitive_storage);
     world.add_resource(mesh_storage);
-    world.add_resource(mesh_handle_map);
-    world.add_resource(systems::HelmetArraySize{ x: 3, y: 3, z: 3 });
+    world.add_resource(systems::HelmetArraySize{ x: 0, y: 0, z: 0 });
     world.add_resource(systems::HelmetArrayEntities(Vec::new()));
+    world.add_resource(systems::MeshInstanceStorage(Default::default()));
     world.add_resource(systems::InstanceCache {
         dirty_entities: vec![specs::BitSet::new(); FRAMES_IN_FLIGHT as _],
         dirty_mesh_indirects: vec![HashSet::new(); FRAMES_IN_FLIGHT as _],
@@ -415,10 +421,6 @@ fn run() -> Result<(), failure::Error> {
     let mut pbr_graph = pbr_graph_builder
         .with_frames_in_flight(FRAMES_IN_FLIGHT)
         .build(&mut factory, &mut families, &mut world)?;
-
-    let pbr_aux_input_system = systems::PbrAuxInputSystem {
-        helmet_mesh: 0 as asset::MeshHandle,
-    };
 
     let instance_cache_update_system = {
         let mut mesh_storage = world.write_storage::<components::Mesh>();
@@ -434,6 +436,7 @@ fn run() -> Result<(), failure::Error> {
             dirty_mesh_indirects_scratch: HashSet::new(),
             mesh_inserted: mesh_storage.mask().clone(),
             mesh_deleted: BitSet::new(),
+            mesh_modified: BitSet::new(),
             mesh_entity_bitsets: vec![BitSet::new(); num_meshes],
             _pd: core::marker::PhantomData::<Backend>,
         }
