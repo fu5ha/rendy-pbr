@@ -18,9 +18,9 @@ pub struct MouseState {
 }
 
 pub const ROTATE_SENSITIVITY: f32 = 0.005;
-pub const TRANSLATE_SENSITIVITY: f32 = 0.01;
-pub const ZOOM_MOUSE_SENSITIVITY: f32 = 0.025;
-pub const ZOOM_SCROLL_SENSITIVITY: f32 = 1.0;
+pub const TRANSLATE_SENSITIVITY: f32 = 0.005;
+pub const ZOOM_MOUSE_SENSITIVITY: f32 = 0.0125;
+pub const ZOOM_SCROLL_SENSITIVITY: f32 = 0.25;
 pub const EXPOSURE_ADJUST_SENSITIVITY: f32 = 0.1;
 
 #[derive(Derivative, Debug, Clone, Copy)]

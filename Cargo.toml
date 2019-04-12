@@ -27,13 +27,13 @@ specs = "0.14"
 hibitset = "0.5"
 
 [dependencies.gltf]
-# git = "https://github.com/gltf-rs/gltf"
-# rev = "acf33a93e82aea16fd36e81f9a667d5b2ab064a1"
-path = "../gltf"
+git = "https://github.com/gltf-rs/gltf"
+rev = "acf33a93e82aea16fd36e81f9a667d5b2ab064a1"
+# path = "../gltf"
 
 [dependencies.rendy]
 optional = true
-path = "../rendy/rendy"
+# path = "../rendy/rendy"
 features = ["texture-image"]
-# git = "https://github.com/termhn/rendy"
-# rev = "73252e1c42e3e92793c36158f1553fa098fe631e"
+git = "https://github.com/termhn/rendy"
+rev = "f84ac11f7bbc632557254b657c7249edb4fe98e2"

@@ -182,9 +182,14 @@
          "mesh": 0,
          "name": "SciFiHelmet",
          "translation": [
-            -2.5,
+            -0.5,
             0.0,
             0.0
+         ],
+         "scale": [
+            0.15,
+            0.15,
+            0.15
          ]
       }
    ],
