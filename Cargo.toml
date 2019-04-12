@@ -13,7 +13,7 @@ empty = ["rendy/empty"]
 
 [dependencies]
 genmesh = "0.6"
-nalgebra = "0.16"
+nalgebra = "0.17"
 env_logger = "0.5"
 failure = "0.1"
 lazy_static = "1.0"
@@ -22,12 +22,18 @@ log = "0.4"
 winit = "0.18"
 palette = "0.4"
 rand = "0.6"
-gfx-hal = "0.1"
 derivative = "1.0"
-gltf = "0.11"
+specs = "0.14"
+hibitset = "0.5"
+
+[dependencies.gltf]
+git = "https://github.com/gltf-rs/gltf"
+rev = "acf33a93e82aea16fd36e81f9a667d5b2ab064a1"
+# path = "../gltf"
 
 [dependencies.rendy]
 optional = true
 # path = "../rendy/rendy"
-git = "https://github.com/omni-viral/rendy"
-rev = "04cf6a6e58c57b3a9b74cf6eeaf522f5c40194a8"
+features = ["texture-image"]
+git = "https://github.com/termhn/rendy"
+rev = "f84ac11f7bbc632557254b657c7249edb4fe98e2"

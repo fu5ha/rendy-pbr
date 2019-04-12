@@ -22,10 +22,11 @@ other helpers.
 * **Middle click**: Pan camera
 * **Right click/Scroll wheel**: Dolly camera
 
-### Model controls
-* **X**: Add a row of models in the X direction
-* **Y**: Add a row of models in the Y direction
-* **Z**: Add a row of models in the Z direction
+\* *Note: for now these controls are disabled*
+### ~~Model controls~~
+* ~~**X**: Add a row of models in the X direction~~
+* ~~**Y**: Add a row of models in the Y direction~~
+* ~~**Z**: Add a row of models in the Z direction~~
 
 \* *Hold shift to subtract a row*
 
@@ -34,6 +35,7 @@ other helpers.
 * **U**: Use Uncharted 2 Tonemapping curve
 * **C**: Display Uncharted 2 and ACES in split-screen configuration
 * **Hold CTRL + left click**: Adjust split screen split
+* **E**: Increase exposure f-stop (hold shift to decrease)
 
 # Screenshots
 

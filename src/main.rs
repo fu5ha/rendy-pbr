@@ -4,27 +4,34 @@
 )]
 
 use rendy::{
-    command::{Supports, Graphics},
-    factory::{Config, Factory},
+    command::{Graphics, Supports},
+    factory::{Config, Factory, ImageState},
     graph::{present::PresentNode, render::*, GraphBuilder},
     memory::MemoryUsageValue,
 };
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::File,
     path::Path,
     time,
 };
 
-use gfx_hal as hal;
+use rendy::hal;
 
-use winit::{EventsLoop, WindowBuilder, Event, WindowEvent};
+use specs::prelude::*;
+
+use winit::{Event, EventsLoop, WindowBuilder, WindowEvent};
 
 mod asset;
-mod scene;
+mod components;
 mod input;
-mod pass;
+mod node;
+mod systems;
+
+pub const CUBEMAP_RES: u32 = 512;
+pub const MAX_LIGHTS: usize = 32;
+pub const FRAMES_IN_FLIGHT: u32 = 3;
 
 #[cfg(feature = "dx12")]
 pub type Backend = rendy::dx12::Backend;
@@ -38,38 +45,6 @@ pub type Backend = rendy::vulkan::Backend;
 #[cfg(feature = "empty")]
 pub type Backend = rendy::empty::Backend;
 
-pub struct Aux<B: hal::Backend> {
-    pub frames: usize,
-    pub align: u64,
-    pub instance_array_size: (usize, usize, usize),
-    pub scene: scene::Scene<B>,
-    pub material_storage: HashMap<u64, asset::Material<B>>,
-    pub tonemapper_args: pass::tonemap::TonemapperArgs,
-}
-
-pub fn generate_instances(size: (usize, usize, usize)) -> Vec<nalgebra::Matrix4<f32>> {
-    let x_size = 3.0;
-    let y_size = 4.0;
-    let z_size = 4.0;
-    let mut instances = Vec::with_capacity(size.0 * size.1 * size.2);
-    for x in 0..size.0 {
-        for y in 0..size.1 {
-            for z in 0..size.2 {
-                instances.push(
-                    nalgebra::Matrix4::new_translation(
-                        &nalgebra::Vector3::new(
-                            (x as f32 * x_size) - (x_size * (size.0 - 1) as f32 * 0.5),
-                            (y as f32 * y_size) - (y_size * (size.1 - 1) as f32 * 0.5),
-                            (z as f32 * z_size) - (z_size * (size.2 - 1) as f32 * 0.5)
-                        )
-                    )
-                );
-            }
-        }
-    }
-    instances
-}
-
 #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
 fn main() {
     env_logger::Builder::from_default_env()
@@ -77,199 +52,416 @@ fn main() {
         .filter_module("rendy_pbr", log::LevelFilter::Trace)
         .init();
 
+    match run() {
+        Err(e) => log::error!("{}\n\nBACKTRACE:\n{}", e, e.backtrace()),
+        _ => (),
+    }
+}
+
+fn process_node(node: gltf::Node, world: &mut specs::World, base_mesh_index: usize) {
+    if let Some(mesh) = node.mesh() {
+        use gltf::scene::Transform;
+        let node_transform = match node.transform() {
+            Transform::Matrix { .. } => unimplemented!(),
+            Transform::Decomposed {
+                translation,
+                rotation,
+                scale,
+            } => {
+                nalgebra::Similarity3::from_parts(
+                    nalgebra::Translation3::new(translation[0], translation[1], translation[2]),
+                    nalgebra::UnitQuaternion::from_quaternion(nalgebra::Quaternion::new(
+                        rotation[3],
+                        rotation[0],
+                        rotation[1],
+                        rotation[2],
+                    )),
+                    scale.iter().sum::<f32>() / 3.0,
+                )
+            }
+        };
+
+        log::debug!("Create entity with transform: {}", node_transform);
+
+        world.create_entity()
+            .with(components::Transform(node_transform))
+            .with(components::Mesh(base_mesh_index + mesh.index()))
+        .build();
+    }
+
+    for node in node.children() {
+        process_node(node, world, base_mesh_index);
+    }
+}
+
+#[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
+fn run() -> Result<(), failure::Error> {
+    // Initialize specs and register components
+    let mut world = specs::World::new();
+
+    world.register::<components::Transform>();
+    world.register::<components::Mesh>();
+    world.register::<components::Camera>();
+    world.register::<components::ActiveCamera>();
+    world.register::<components::Light>();
+
     let config: Config = Default::default();
 
-    let (mut factory, mut families): (Factory<Backend>, _) = rendy::factory::init(config).unwrap();
+    let (mut factory, mut families): (Factory<Backend>, _) = rendy::factory::init(config)?;
 
-    let queue = families.as_slice()
+    let align = hal::adapter::PhysicalDevice::limits(factory.physical())
+        .min_uniform_buffer_offset_alignment;
+
+    let queue = families
+        .as_slice()
         .iter()
-        .find(|family| if let Some(Graphics) = family.capability().supports() {
-            true
-        } else {
-            false
+        .find(|family| {
+            if let Some(Graphics) = family.capability().supports() {
+                true
+            } else {
+                false
+            }
         })
         .unwrap()
         .as_slice()[0]
         .id();
+
+    // // Preprocess steps to load environment map, convert it to a cubemap,
+    // // and filter it for use later
+    // let mut env_preprocess_graph_builder =
+    //     GraphBuilder::<Backend, node::env_preprocess::Aux<Backend>>::new();
+
+    // let mut equirect_to_faces =
+    //     node::env_preprocess::equirectangular_to_cube_faces::Pipeline::<Backend>::builder()
+    //         .into_subpass();
+
+    // let cube_face_images = hal::image::CUBE_FACES
+    //     .into_iter()
+    //     .map(|_| {
+    //         env_preprocess_graph_builder.create_image(
+    //             hal::image::Kind::D2(CUBEMAP_RES, CUBEMAP_RES, 1, 1),
+    //             1,
+    //             hal::format::Format::Rgba32Float,
+    //             MemoryUsageValue::Data,
+    //             Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
+    //         )
+    //     })
+    //     .collect::<Vec<_>>();
+
+    // for image in cube_face_images.iter().cloned() {
+    //     equirect_to_faces.add_color(image);
+    // }
+
+    // let equirect_to_faces_pass =
+    //     env_preprocess_graph_builder.add_node(equirect_to_faces.into_pass());
+
+    // let _faces_to_cubemap_pass = env_preprocess_graph_builder.add_node(
+    //     node::env_preprocess::faces_to_cubemap::FacesToCubemap::<Backend>::builder(
+    //         cube_face_images,
+    //     )
+    //     .with_dependency(equirect_to_faces_pass),
+    // );
+
+    // let equirect_file = std::fs::File::open(concat!(
+    //     env!("CARGO_MANIFEST_DIR"),
+    //     "/assets/environment/abandoned_hall_01_4k.hdr"
+    // ))?;
+
+    // let equirect_tex = rendy::texture::image::load_from_image(
+    //     std::io::BufReader::new(equirect_file),
+    //     Default::default(),
+    //     TextureUsage,
+    //     factory.physical(),
+    // )?
+    // .build(
+    //     ImageState {
+    //         queue,
+    //         stage: hal::pso::PipelineStage::FRAGMENT_SHADER,
+    //         access: hal::image::Access::SHADER_READ,
+    //         layout: hal::image::Layout::ShaderReadOnlyOptimal,
+    //     },
+    //     &mut factory,
+    //     TextureUsage,
+    // )?;
+
+    // let cubemap_tex = rendy::texture::TextureBuilder::new()
+    //     .with_kind(rendy::resource::image::Kind::D2(
+    //         CUBEMAP_RES,
+    //         CUBEMAP_RES,
+    //         6,
+    //         1,
+    //     ))
+    //     .with_view_kind(rendy::resource::image::ViewKind::Cube)
+    //     .with_raw_format(hal::format::Format::Rgba32Float)
+    //     .build(
+    //         ImageState {
+    //             queue,
+    //             stage: hal::pso::PipelineStage::TRANSFER,
+    //             access: hal::image::Access::TRANSFER_WRITE,
+    //             layout: hal::image::Layout::TransferDstOptimal,
+    //         },
+    //         &mut factory,
+    //         TextureUsage,
+    //     )?;
+
+    // let mut env_preprocess_aux = node::env_preprocess::Aux {
+    //     align,
+    //     equirectangular_texture: equirect_tex,
+    //     environment_cubemap: cubemap_tex,
+    // };
+
+    // let mut env_preprocess_graph =
+    //     env_preprocess_graph_builder.build(&mut factory, &mut families, &mut env_preprocess_aux)?;
+
+    // factory.maintain(&mut families);
+    // env_preprocess_graph.run(&mut factory, &mut families, &mut env_preprocess_aux);
+    // env_preprocess_graph.dispose(&mut factory, &mut env_preprocess_aux);
+
+    // Main window and render graph building
     let mut event_loop = EventsLoop::new();
 
     let window = WindowBuilder::new()
         .with_title("rendy-pbr")
         .with_dimensions(winit::dpi::LogicalSize::new(1280.0, 960.0))
-        .build(&event_loop)
-        .unwrap();
+        .build(&event_loop)?;
 
-    let mut input = input::InputState::new(window.get_inner_size().unwrap());
+    let input = input::InputState::new(window.get_inner_size().unwrap());
+    let event_bucket = input::EventBucket(Vec::new());
 
     event_loop.poll_events(|_| ());
 
     let surface = factory.create_surface(window.into());
     let aspect = surface.aspect();
 
-    let mut graph_builder = GraphBuilder::<Backend, Aux<Backend>>::new();
+    let mut pbr_graph_builder = GraphBuilder::<Backend, specs::World>::new();
 
-    let hdr = graph_builder.create_image(
+    let hdr = pbr_graph_builder.create_image(
         surface.kind(),
         1,
         hal::format::Format::Rgba32Float,
-        MemoryUsageValue::Data,
-        Some(hal::command::ClearValue::Color(
-            [0.1, 0.3, 0.4, 1.0].into(),
-        )),
+        Some(hal::command::ClearValue::Color([0.1, 0.3, 0.4, 1.0].into())),
     );
 
-    let color = graph_builder.create_image(
+    let color = pbr_graph_builder.create_image(
         surface.kind(),
         1,
         factory.get_surface_format(&surface),
-        MemoryUsageValue::Data,
-        Some(hal::command::ClearValue::Color(
-            [0.1, 0.3, 0.4, 1.0].into(),
-        )),
+        Some(hal::command::ClearValue::Color([0.1, 0.3, 0.4, 1.0].into())),
     );
 
-    let depth = graph_builder.create_image(
+    let depth = pbr_graph_builder.create_image(
         surface.kind(),
         1,
         hal::format::Format::D16Unorm,
-        MemoryUsageValue::Data,
         Some(hal::command::ClearValue::DepthStencil(
             hal::command::ClearDepthStencil(1.0, 0),
         )),
     );
 
-    let mesh_pass = graph_builder.add_node(
-        pass::mesh::Pipeline::builder()
+    let mesh_pass = pbr_graph_builder.add_node(
+        node::pbr::mesh::Pipeline::builder()
             .into_subpass()
             .with_color(hdr)
             .with_depth_stencil(depth)
-            .into_pass()
+            .into_pass(),
     );
 
-    let tonemap_pass = graph_builder.add_node(
-        pass::tonemap::Pipeline::builder()
+    let tonemap_pass = pbr_graph_builder.add_node(
+        node::pbr::tonemap::Pipeline::builder()
             .with_image(hdr)
             .into_subpass()
             .with_dependency(mesh_pass)
             .with_color(color)
-            .into_pass()
+            .into_pass(),
     );
 
-    let present_builder = PresentNode::builder(&factory, surface, color)
-        .with_dependency(tonemap_pass);
+    pbr_graph_builder
+        .add_node(PresentNode::builder(&factory, surface, color).with_dependency(tonemap_pass));
 
-    let frames = present_builder.image_count() as usize;
+    let (material_storage, primitive_storage, mesh_storage) = {
+        let paths = vec![
+            ("assets/gltf/SciFiHelmet", "SciFiHelmet.gltf"),
+            ("assets/gltf/FlightHelmet", "FlightHelmet.gltf"),
+            ("assets/gltf/Corset", "Corset.gltf")
+        ];
 
-    graph_builder.add_node(present_builder);
+        let mut mesh_storage = Vec::new();
+        let mut primitive_storage = Vec::new();
+        let mut material_storage = Vec::new();
+        for path in paths {
+            let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path.0);
+            let file = File::open(base_path.join(path.1))?;
+            let reader = std::io::BufReader::new(file);
+            let gltf = gltf::Gltf::from_reader(reader)?;
 
-    let mut material_storage = HashMap::new();
+            let gltf_buffers = asset::GltfBuffers::load_from_gltf(&base_path, &gltf)?;
 
-    let mut helmet: Option<scene::Object<Backend>> = None;
-    {
-        let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/gltf/helmet/");
-        let file = File::open(base_path.join("SciFiHelmet.gltf")).unwrap();
-        let reader = std::io::BufReader::new(file);
-        let gltf = gltf::Gltf::from_reader(reader).unwrap();
+            let base_mesh_index = mesh_storage.len();
+            let base_material_index = material_storage.len();
+            for _ in 0..gltf.meshes().len() {
+                mesh_storage.push(None);
+            }
+            for _ in 0..gltf.materials().len() {
+                material_storage.push(None);
+            }
 
-        let gltf_buffers = asset::GltfBuffers::load_from_gltf(&base_path, &gltf);
+            for mesh in gltf.meshes() {
+                asset::load_gltf_mesh(
+                    &mesh,
+                    256,
+                    &base_path,
+                    &gltf_buffers,
+                    base_mesh_index,
+                    base_material_index,
+                    &mut material_storage,
+                    &mut primitive_storage,
+                    &mut mesh_storage,
+                    &mut factory,
+                    queue,
+                )?;
+            }
 
-        let scene = gltf.scenes().next().unwrap();
+            let scene = gltf.scenes().next().unwrap();
 
-
-        for node in scene.nodes() {
-            match node.name() {
-                Some("SciFiHelmet") => {
-                    if let Some(mesh) = node.mesh() {
-                        helmet = Some(asset::object_from_gltf(
-                            &mesh,
-                            &base_path,
-                            &gltf_buffers,
-                            &mut material_storage,
-                            &mut factory,
-                            queue
-                        ));
-                    }
-                },
-                _ => (),
+            for node in scene.nodes() {
+                process_node(node, &mut world, base_mesh_index);
             }
         }
-    }
 
-    let camera = scene::Camera {
-        yaw: 0.0,
-        pitch: 0.0,
-        dist: 10.0,
-        focus: nalgebra::Point3::new(0.0, 0.0, 0.0),
-        proj: nalgebra::Perspective3::new(aspect, 3.1415 / 6.0, 1.0, 200.0),
-        view: nalgebra::Isometry3::from_parts(
-            nalgebra::Translation3::new(0.0, 0.0, -10.0),
-            nalgebra::UnitQuaternion::identity(),
-        ),
+        let material_storage = asset::MaterialStorage(
+            material_storage
+                .into_iter()
+                .map(|mut m| m.take().unwrap())
+                .collect::<Vec<_>>(),
+        );
+        let primitive_storage = asset::PrimitiveStorage(
+            primitive_storage
+                .into_iter()
+                .map(|mut p| p.take().unwrap())
+                .collect::<Vec<_>>(),
+        );
+        let mesh_storage = asset::MeshStorage(
+            mesh_storage
+                .into_iter()
+                .map(|mut m| m.take().unwrap())
+                .collect::<Vec<_>>(),
+        );
+        (material_storage, primitive_storage, mesh_storage)
     };
-    let instance_array_size = (1,1,1);
-    let mut aux = Aux {
-        frames,
-        align: hal::adapter::PhysicalDevice::limits(factory.physical())
-            .min_uniform_buffer_offset_alignment,
-        instance_array_size,
-        scene: scene::Scene {
-            camera,
-            max_obj_instances: vec![
-                512,
-            ],
-            objects: vec![
-                (helmet.unwrap(), generate_instances(instance_array_size)),
-            ],
-            lights: vec![
-                scene::Light {
-                    pos: nalgebra::Vector3::new(10.0, 10.0, 2.0),
-                    intensity: 150.0,
-                    color: [1.0, 1.0, 1.0],
-                    _pad: 0.0,
-                },
-                scene::Light {
-                    pos: nalgebra::Vector3::new(8.0, 10.0, 2.0),
-                    intensity: 150.0,
-                    color: [1.0, 1.0, 1.0],
-                    _pad: 0.0,
-                },
-                scene::Light {
-                    pos: nalgebra::Vector3::new(8.0, 10.0, 4.0),
-                    intensity: 150.0,
-                    color: [1.0, 1.0, 1.0],
-                    _pad: 0.0,
-                },
-                scene::Light {
-                    pos: nalgebra::Vector3::new(10.0, 10.0, 4.0),
-                    intensity: 150.0,
-                    color: [1.0, 1.0, 1.0],
-                    _pad: 0.0,
-                },
-                scene::Light {
-                    pos: nalgebra::Vector3::new(-4.0, 0.0, -5.0),
-                    intensity: 250.0,
-                    color: [1.0, 1.0, 1.0],
-                    _pad: 0.0,
-                },
-                scene::Light {
-                    pos: nalgebra::Vector3::new(-5.0, 5.0, -2.0),
-                    intensity: 25.0,
-                    color: [1.0, 1.0, 1.0],
-                    _pad: 0.0,
-                },
-            ]
-        },
-        material_storage,
-        tonemapper_args: pass::tonemap::TonemapperArgs {
+
+    let num_meshes = mesh_storage.0.len();
+    let num_materials = material_storage.0.len();
+    let pbr_aux = node::pbr::Aux {
+        frames: FRAMES_IN_FLIGHT as _,
+        align,
+        tonemapper_args: node::pbr::tonemap::TonemapperArgs {
             exposure: 2.5,
             curve: 0,
             comparison_factor: 0.5,
+        },
+    };
+
+    let camera = components::Camera {
+        yaw: 0.0,
+        pitch: 0.0,
+        dist: 4.0,
+        focus: nalgebra::Point3::new(0.0, 0.0, 0.0),
+        proj: nalgebra::Perspective3::new(aspect, 3.1415 / 6.0, 0.1, 200.0),
+    };
+
+    world
+        .create_entity()
+        .with(camera)
+        .with(components::ActiveCamera)
+        .with(components::Transform(nalgebra::Similarity3::from_parts(
+            nalgebra::Translation3::new(0.0, 0.0, 4.0),
+            nalgebra::UnitQuaternion::identity(),
+            1.0,
+        )))
+        .build();
+    let light_pos_intensities = vec![
+        (nalgebra::Vector3::new(10.0, 10.0, 2.0), 150.0),
+        (nalgebra::Vector3::new(8.0, 10.0, 2.0), 150.0),
+        (nalgebra::Vector3::new(8.0, 10.0, 4.0), 150.0),
+        (nalgebra::Vector3::new(10.0, 10.0, 4.0), 150.0),
+        (nalgebra::Vector3::new(-4.0, 0.0, -5.0), 250.0),
+        (nalgebra::Vector3::new(-5.0, 5.0, -2.0), 25.0),
+    ];
+
+    for (pos, intensity) in light_pos_intensities.into_iter() {
+        world
+            .create_entity()
+            .with(components::Light {
+                intensity,
+                color: [1.0, 1.0, 1.0],
+            })
+            .with(components::Transform(
+                nalgebra::Similarity3::identity() * nalgebra::Translation3::from(pos),
+            ))
+            .build();
+    }
+
+    // Add specs resources
+    world.add_resource(pbr_aux);
+    world.add_resource(input);
+    world.add_resource(event_bucket);
+    world.add_resource(material_storage);
+    world.add_resource(primitive_storage);
+    world.add_resource(mesh_storage);
+    world.add_resource(systems::HelmetArraySize{ x: 0, y: 0, z: 0 });
+    world.add_resource(systems::HelmetArrayEntities(Vec::new()));
+    world.add_resource(systems::MeshInstanceStorage(Default::default()));
+    world.add_resource(systems::InstanceCache {
+        dirty_entities: vec![specs::BitSet::new(); FRAMES_IN_FLIGHT as _],
+        dirty_mesh_indirects: vec![HashSet::new(); FRAMES_IN_FLIGHT as _],
+        mesh_instance_counts: vec![0; num_meshes],
+        material_bitsets: vec![specs::BitSet::new(); num_materials],
+    });
+
+    let mut pbr_graph = pbr_graph_builder
+        .with_frames_in_flight(FRAMES_IN_FLIGHT)
+        .build(&mut factory, &mut families, &mut world)?;
+
+    let instance_cache_update_system = {
+        let mut mesh_storage = world.write_storage::<components::Mesh>();
+
+        systems::InstanceCacheUpdateSystem {
+            frames_in_flight: FRAMES_IN_FLIGHT as usize,
+            previous_frame: FRAMES_IN_FLIGHT as usize - 1,
+            transform_reader_id: world
+                .write_storage::<components::Transform>()
+                .register_reader(),
+            mesh_reader_id: mesh_storage.register_reader(),
+            dirty_entities_scratch: specs::BitSet::new(),
+            dirty_mesh_indirects_scratch: HashSet::new(),
+            mesh_inserted: mesh_storage.mask().clone(),
+            mesh_deleted: BitSet::new(),
+            mesh_modified: BitSet::new(),
+            mesh_entity_bitsets: vec![BitSet::new(); num_meshes],
+            _pd: core::marker::PhantomData::<Backend>,
         }
     };
 
-    let mut graph = graph_builder
-        .build(&mut factory, &mut families, &mut aux)
-        .unwrap();
+    let mut dispatcher = DispatcherBuilder::new()
+        .with(systems::CameraInputSystem, "camera_input_system", &[])
+        .with(systems::PbrAuxInputSystem {
+            helmet_mesh: 0 as asset::MeshHandle,
+        }, "pbr_aux_input_system", &[])
+        .with(systems::HelmetArraySizeUpdateSystem {
+            curr_size: Default::default(),
+            helmet_mesh: 0 as asset::MeshHandle,
+        }, "helmet_array_size_update_system", &["pbr_aux_input_system"])
+        .with(
+            instance_cache_update_system,
+            "instance_cache_update_system",
+            &["helmet_array_size_update_system"],
+        )
+        .with(
+            systems::InputSystem,
+            "input_system",
+            &["pbr_aux_input_system", "camera_input_system"],
+        )
+        .build();
 
     let started = time::Instant::now();
 
@@ -282,18 +474,26 @@ fn main() {
         let start = frames.start;
         for _ in &mut frames {
             factory.maintain(&mut families);
-            event_loop.poll_events(|event| match event {
-                Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => should_close = true,
-                Event::WindowEvent { event, .. } => {
-                    input.handle_window_event(&event, &mut aux);
-                },
-                Event::DeviceEvent { event, .. } => {
-                    input.handle_device_event(&event, &mut aux);
-                }
-                _ => (),
-            });
-            aux.scene.objects[0].1 = generate_instances(aux.instance_array_size);
-            graph.run(&mut factory, &mut families, &mut aux);
+            {
+                let mut event_bucket = world.write_resource::<input::EventBucket>();
+                event_bucket.0.clear();
+
+                event_loop.poll_events(|event| match event {
+                    Event::WindowEvent {
+                        event: WindowEvent::CloseRequested,
+                        ..
+                    } => should_close = true,
+                    _ => {
+                        event_bucket.0.push(event);
+                    }
+                });
+            }
+
+            dispatcher.dispatch(&mut world.res);
+
+            world.maintain();
+
+            pbr_graph.run(&mut factory, &mut families, &mut world);
 
             let elapsed = checkpoint.elapsed();
 
@@ -301,17 +501,22 @@ fn main() {
                 let frames = frames.start - start;
                 let nanos = elapsed.as_secs() * 1_000_000_000 + elapsed.subsec_nanos() as u64;
                 log::info!("FPS: {}", frames * 1_000_000_000 / nanos);
-                log::info!("Tonemapper Settings: {}", aux.tonemapper_args);
+                log::info!(
+                    "Tonemapper Settings: {}",
+                    world.read_resource::<node::pbr::Aux>().tonemapper_args
+                );
                 checkpoint += elapsed;
                 break;
             }
         }
     }
 
-    graph.dispose(&mut factory, &mut aux);
+    pbr_graph.dispose(&mut factory, &mut world);
+    Ok(())
 }
 
 #[cfg(not(any(feature = "dx12", feature = "metal", feature = "vulkan")))]
-fn main() {
+fn main() -> Result<(), failure::Error> {
     panic!("Specify feature: { dx12, metal, vulkan }");
+    Ok(())
 }
