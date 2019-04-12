@@ -1,7 +1,7 @@
 use crate::{asset, components, input, node};
 use nalgebra::Similarity3;
 use rendy::hal;
-use specs::prelude::*;
+use specs::{prelude::*, storage::UnprotectedStorage};
 
 use std::collections::HashSet;
 
@@ -368,7 +368,6 @@ impl<'a> System<'a> for HelmetArraySizeUpdateSystem {
             }
             while helmet_array_entities.0.len() > helmet_array_size.size() {
                 let entity = helmet_array_entities.0.pop().unwrap();
-                log::debug!("delete entity: {:?}", entity);
                 entities.delete(entity).unwrap();
                 meshes.remove(entity);
                 transforms.remove(entity);
@@ -378,18 +377,23 @@ impl<'a> System<'a> for HelmetArraySizeUpdateSystem {
                 if let Ok(entry) = transforms.entry(*entity) {
                     let entity_transform = entry.or_insert(Default::default());
                     entity_transform.0 = transform
-                } else {
-                    panic!("lul");
                 }
                 if let Ok(entry) = meshes.entry(*entity) {
                     entry.or_insert(components::Mesh(self.helmet_mesh));
-                } else {
-                    panic!("lul");
                 }
             }
         }
     }
 }
+
+pub type InstanceIndex = u16;
+pub struct MeshInstance {
+    pub mesh: asset::MeshHandle,
+    pub instance: InstanceIndex,
+}
+
+#[derive(Default)]
+pub struct MeshInstanceStorage(pub DenseVecStorage<MeshInstance>);
 
 #[derive(Default, Debug)]
 pub struct InstanceCache {
@@ -408,6 +412,7 @@ pub struct InstanceCacheUpdateSystem<B> {
     pub dirty_mesh_indirects_scratch: HashSet<asset::MeshHandle>,
     pub mesh_inserted: BitSet,
     pub mesh_deleted: BitSet,
+    pub mesh_modified: BitSet,
     pub mesh_entity_bitsets: Vec<BitSet>,
     pub _pd: core::marker::PhantomData<B>,
 }
@@ -417,8 +422,8 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
         Entities<'a>,
         Write<'a, InstanceCache>,
         Read<'a, asset::MeshStorage>,
+        Write<'a, MeshInstanceStorage>,
         Read<'a, asset::PrimitiveStorage<B>>,
-        WriteStorage<'a, components::MeshInstance>,
         ReadStorage<'a, components::Mesh>,
         ReadStorage<'a, components::Transform>,
     );
@@ -429,8 +434,8 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
             entities,
             mut cache,
             mesh_storage,
+            mut mesh_instance_storage,
             primitive_storage,
-            mut mesh_instances,
             meshes,
             transforms,
         ): Self::SystemData,
@@ -443,15 +448,13 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
             let events = meshes.channel().read(&mut self.mesh_reader_id);
             for event in events {
                 match event {
-                    ComponentEvent::Modified(id) => {
-                        panic!("Changing mesh not supported.. delete entity and make a new one");
-                    }
                     ComponentEvent::Inserted(id) => {
                         self.mesh_inserted.add(*id);
                     }
                     ComponentEvent::Removed(id) => {
                         self.mesh_deleted.add(*id);
                     }
+                    _ => ()
                 };
             }
         }
@@ -469,13 +472,40 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
                 };
             }
         }
+        for (entity, _) in (&entities, &self.mesh_deleted).join() {
+            let MeshInstance { mesh, instance } = unsafe { mesh_instance_storage.0.remove(entity.id()) };
+            self.mesh_entity_bitsets[mesh].remove(entity.id());
+            cache.mesh_instance_counts[mesh] -= 1;
+            log::debug!("Mesh instance count: {}", cache.mesh_instance_counts[mesh]);
+            for primitive_idx in mesh_storage.0[mesh].primitives.iter() {
+                let primitive = &primitive_storage.0[*primitive_idx];
+                cache.material_bitsets[primitive.mat].remove(entity.id());
+            }
+            for (entity, _) in (
+                &entities,
+                &self.mesh_entity_bitsets[mesh],
+            )
+                .join()
+            {
+                let mesh_instance = unsafe { mesh_instance_storage.0.get_mut(entity.id()) };
+                if mesh_instance.instance > instance {
+                    mesh_instance.instance -= 1;
+                    self.dirty_entities_scratch.add(entity.id());
+                }
+            }
+            self.dirty_mesh_indirects_scratch.insert(mesh);
+        }
         for (entity, mesh, _) in (&entities, &meshes, &self.mesh_inserted).join() {
-            mesh_instances
-                .insert(
-                    entity,
-                    components::MeshInstance(cache.mesh_instance_counts[mesh.0] as components::InstanceIndex),
-                )
-                .unwrap();
+            unsafe { 
+                mesh_instance_storage.0
+                    .insert(
+                        entity.id(),
+                        MeshInstance {
+                            mesh: mesh.0,
+                            instance: cache.mesh_instance_counts[mesh.0] as InstanceIndex,
+                        }
+                    );
+            }
             cache.mesh_instance_counts[mesh.0] += 1;
             log::debug!("Mesh instance count: {}", cache.mesh_instance_counts[mesh.0]);
             for primitive_idx in mesh_storage.0[mesh.0].primitives.iter() {
@@ -486,36 +516,13 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
             self.dirty_entities_scratch.add(entity.id());
             self.dirty_mesh_indirects_scratch.insert(mesh.0);
         }
-        for (entity, mesh, _) in (&entities, &meshes, &self.mesh_deleted).join() {
-            let deleted_idx = mesh_instances.get(entity).unwrap().0;
-            mesh_instances.remove(entity);
-            self.mesh_entity_bitsets[mesh.0].remove(entity.id());
-            cache.mesh_instance_counts[mesh.0] -= 1;
-            log::debug!("Mesh instance count: {}", cache.mesh_instance_counts[mesh.0]);
-            for primitive_idx in mesh_storage.0[mesh.0].primitives.iter() {
-                let primitive = &primitive_storage.0[*primitive_idx];
-                cache.material_bitsets[primitive.mat].remove(entity.id());
-            }
-            for (entity, mesh_instance, _) in (
-                &entities,
-                &mut mesh_instances,
-                &self.mesh_entity_bitsets[mesh.0],
-            )
-                .join()
-            {
-                if mesh_instance.0 > deleted_idx {
-                    mesh_instance.0 -= 1;
-                    self.dirty_entities_scratch.add(entity.id());
-                }
-            }
-            self.dirty_mesh_indirects_scratch.insert(mesh.0);
-        }
         for i in 0..self.frames_in_flight {
             cache.dirty_entities[i] |= &self.dirty_entities_scratch;
             cache.dirty_mesh_indirects[i].extend(&self.dirty_mesh_indirects_scratch);
         }
+        self.previous_frame = (self.previous_frame + 1) % self.frames_in_flight;
         self.mesh_inserted.clear();
         self.mesh_deleted.clear();
-        self.previous_frame = (self.previous_frame + 1) % self.frames_in_flight;
+        self.mesh_modified.clear();
     }
 }

@@ -51,18 +51,6 @@ impl Component for ActiveCamera {
     type Storage = NullStorage<Self>;
 }
 
-pub type InstanceIndex = u16;
-/// The global number instance that this entity is of its attached mesh.
-/// This should only be added and changed automatically by the `InstanceCacheUpdateSystem`.
-pub struct MeshInstance {
-    pub mesh: asset::MeshHandle,
-    pub intance: InstanceIndex,
-}
-
-impl Component for MeshInstance {
-    type Storage = DenseVecStorage<Self>;
-}
-
 // pub struct Environment<B: hal::Backend> {
 //     mesh: Mesh<B>,
 //     hdr: Texture<B>,
