@@ -364,9 +364,9 @@ fn run() -> Result<(), failure::Error> {
     let camera = components::Camera {
         yaw: 0.0,
         pitch: 0.0,
-        dist: 10.0,
+        dist: 4.0,
         focus: nalgebra::Point3::new(0.0, 0.0, 0.0),
-        proj: nalgebra::Perspective3::new(aspect, 3.1415 / 6.0, 1.0, 200.0),
+        proj: nalgebra::Perspective3::new(aspect, 3.1415 / 6.0, 0.1, 200.0),
     };
 
     world
@@ -374,7 +374,7 @@ fn run() -> Result<(), failure::Error> {
         .with(camera)
         .with(components::ActiveCamera)
         .with(components::Transform(nalgebra::Similarity3::from_parts(
-            nalgebra::Translation3::new(0.0, 0.0, 10.0),
+            nalgebra::Translation3::new(0.0, 0.0, 4.0),
             nalgebra::UnitQuaternion::identity(),
             1.0,
         )))
