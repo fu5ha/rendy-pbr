@@ -1,17 +1,20 @@
 use rendy::{
     command::{QueueId, RenderPassEncoder},
-    factory::{Factory},
-    graph::{render::*, NodeBuffer, NodeImage, ImageAccess},
+    factory::Factory,
+    graph::{render::*, GraphContext, ImageAccess, NodeBuffer, NodeImage},
     hal::{pso::DescriptorPool, Device},
-    resource::{buffer::Buffer, image::{ImageView, Filter, WrapMode, ViewKind}, sampler::Sampler},
+    resource::{
+        Buffer, BufferInfo, DescriptorSetLayout, Escape, Filter, Handle, ImageView, ImageViewInfo,
+        Sampler, SamplerInfo, ViewKind, WrapMode,
+    },
     shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
 };
 
-use gfx_hal as hal;
+use rendy::hal;
 
 use std::mem::size_of;
 
-use crate::Aux;
+use crate::node::pbr::Aux;
 
 lazy_static::lazy_static! {
     static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
@@ -29,7 +32,7 @@ lazy_static::lazy_static! {
     );
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
 pub struct TonemapperArgs {
     pub exposure: f32,
@@ -54,14 +57,14 @@ struct Settings {
     align: u64,
 }
 
-impl<B: hal::Backend> From<&Aux<B>> for Settings {
-    fn from(aux: &Aux<B>) -> Self {
+impl From<&Aux> for Settings {
+    fn from(aux: &Aux) -> Self {
         Self::from_aux(aux)
     }
 }
 
-impl<B: hal::Backend> From<&mut Aux<B>> for Settings {
-    fn from(aux: &mut Aux<B>) -> Self {
+impl From<&mut Aux> for Settings {
+    fn from(aux: &mut Aux) -> Self {
         Self::from_aux(aux)
     }
 }
@@ -69,10 +72,8 @@ impl<B: hal::Backend> From<&mut Aux<B>> for Settings {
 impl Settings {
     const UNIFORM_SIZE: u64 = size_of::<UniformArgs>() as u64;
 
-    fn from_aux<B: hal::Backend>(aux: &Aux<B>) -> Self {
-        Settings {
-            align: aux.align,
-        }
+    fn from_aux(aux: &Aux) -> Self {
+        Settings { align: aux.align }
     }
 
     #[inline]
@@ -90,33 +91,31 @@ impl Settings {
 pub struct PipelineDesc;
 
 #[derive(Debug)]
-pub struct Pipeline<B: gfx_hal::Backend> {
-    buffer: Buffer<B>,
+pub struct Pipeline<B: hal::Backend> {
+    buffer: Escape<Buffer<B>>,
     sets: Vec<B::DescriptorSet>,
     descriptor_pool: B::DescriptorPool,
-    image_sampler: Sampler<B>,
-    image_view: ImageView<B>,
+    image_sampler: Escape<Sampler<B>>,
+    image_view: Escape<ImageView<B>>,
     settings: Settings,
 }
 
-impl<B> SimpleGraphicsPipelineDesc<B, Aux<B>> for PipelineDesc
+impl<B> SimpleGraphicsPipelineDesc<B, specs::World> for PipelineDesc
 where
-    B: gfx_hal::Backend,
+    B: hal::Backend,
 {
     type Pipeline = Pipeline<B>;
 
     fn images(&self) -> Vec<ImageAccess> {
-        vec![
-            ImageAccess {
-                access: rendy::resource::image::Access::SHADER_READ,
-                usage: hal::image::Usage::SAMPLED,
-                layout: hal::image::Layout::ShaderReadOnlyOptimal,
-                stages: hal::pso::PipelineStage::FRAGMENT_SHADER,
-            }
-        ]
+        vec![ImageAccess {
+            access: hal::image::Access::SHADER_READ,
+            usage: hal::image::Usage::SAMPLED,
+            layout: hal::image::Layout::ShaderReadOnlyOptimal,
+            stages: hal::pso::PipelineStage::FRAGMENT_SHADER,
+        }]
     }
 
-    fn depth_stencil(&self) -> Option<gfx_hal::pso::DepthStencilDesc> {
+    fn depth_stencil(&self) -> Option<hal::pso::DepthStencilDesc> {
         None
     }
 
@@ -124,26 +123,26 @@ where
         &self,
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
-        _aux: &mut Aux<B>,
-    ) -> gfx_hal::pso::GraphicsShaderSet<'a, B> {
+        _world: &specs::World,
+    ) -> hal::pso::GraphicsShaderSet<'a, B> {
         storage.clear();
 
         log::trace!("Load shader module '{:#?}'", *VERTEX);
-        storage.push(VERTEX.module(factory).unwrap());
+        storage.push(unsafe { VERTEX.module(factory).unwrap() });
 
         log::trace!("Load shader module '{:#?}'", *FRAGMENT);
-        storage.push(FRAGMENT.module(factory).unwrap());
+        storage.push(unsafe { FRAGMENT.module(factory).unwrap() });
 
-        gfx_hal::pso::GraphicsShaderSet {
-            vertex: gfx_hal::pso::EntryPoint {
+        hal::pso::GraphicsShaderSet {
+            vertex: hal::pso::EntryPoint {
                 entry: "main",
                 module: &storage[0],
-                specialization: gfx_hal::pso::Specialization::default(),
+                specialization: hal::pso::Specialization::default(),
             },
-            fragment: Some(gfx_hal::pso::EntryPoint {
+            fragment: Some(hal::pso::EntryPoint {
                 entry: "main",
                 module: &storage[1],
-                specialization: gfx_hal::pso::Specialization::default(),
+                specialization: hal::pso::Specialization::default(),
             }),
             hull: None,
             domain: None,
@@ -153,51 +152,52 @@ where
 
     fn layout(&self) -> Layout {
         Layout {
-            sets: vec![
-                SetLayout {
-                    bindings: vec![
-                        hal::pso::DescriptorSetLayoutBinding {
-                            binding: 0,
-                            ty: hal::pso::DescriptorType::Sampler,
-                            count: 1,
-                            stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
-                            immutable_samplers: false,
-                        },
-                        hal::pso::DescriptorSetLayoutBinding {
-                            binding: 1,
-                            ty: hal::pso::DescriptorType::SampledImage,
-                            count: 1,
-                            stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
-                            immutable_samplers: false,
-                        },
-                        hal::pso::DescriptorSetLayoutBinding {
-                            binding: 2,
-                            ty: hal::pso::DescriptorType::UniformBuffer,
-                            count: 1,
-                            stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
-                            immutable_samplers: false,
-                        }
-                    ]
-                }
-            ],
+            sets: vec![SetLayout {
+                bindings: vec![
+                    hal::pso::DescriptorSetLayoutBinding {
+                        binding: 0,
+                        ty: hal::pso::DescriptorType::Sampler,
+                        count: 1,
+                        stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                        immutable_samplers: false,
+                    },
+                    hal::pso::DescriptorSetLayoutBinding {
+                        binding: 1,
+                        ty: hal::pso::DescriptorType::SampledImage,
+                        count: 1,
+                        stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                        immutable_samplers: false,
+                    },
+                    hal::pso::DescriptorSetLayoutBinding {
+                        binding: 2,
+                        ty: hal::pso::DescriptorType::UniformBuffer,
+                        count: 1,
+                        stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                        immutable_samplers: false,
+                    },
+                ],
+            }],
             push_constants: Vec::new(),
         }
     }
 
     fn build<'a>(
         self,
+        ctx: &GraphContext<B>,
         factory: &mut Factory<B>,
         _queue: QueueId,
-        aux: &mut Aux<B>,
-        buffers: Vec<NodeBuffer<'a, B>>,
-        images: Vec<NodeImage<'a, B>>,
-        set_layouts: &[B::DescriptorSetLayout],
+        world: &specs::World,
+        buffers: Vec<NodeBuffer>,
+        images: Vec<NodeImage>,
+        set_layouts: &[Handle<DescriptorSetLayout<B>>],
     ) -> Result<Pipeline<B>, failure::Error> {
         assert!(buffers.is_empty());
         assert!(images.len() == 1);
         assert!(set_layouts.len() == 1);
 
-        let settings: Settings = aux.into();
+        let aux = world.read_resource::<Aux>();
+
+        let settings: Settings = (&*aux).into();
 
         let frames = aux.frames;
 
@@ -218,43 +218,46 @@ where
                         count: frames,
                     },
                 ],
+            )?
+        };
+
+        let image_sampler =
+            factory.create_sampler(SamplerInfo::new(Filter::Nearest, WrapMode::Clamp))?;
+
+        let image_handle = ctx
+            .get_image(images[0].id)
+            .ok_or(failure::format_err!("Tonemapper HDR image missing"))?;
+
+        let image_view = factory
+            .create_image_view(
+                image_handle.clone(),
+                ImageViewInfo {
+                    view_kind: ViewKind::D2,
+                    format: hal::format::Format::Rgba32Float,
+                    swizzle: hal::format::Swizzle::NO,
+                    range: images[0].range.clone(),
+                },
             )
-        }
-        .unwrap();
+            .expect("Could not create tonemapper input image view");
 
-        let image_sampler = factory.create_sampler(Filter::Nearest, WrapMode::Clamp).unwrap();
-
-        let image_view = factory.create_image_view(
-            images[0].image,
-            ViewKind::D2,
-            hal::format::Format::Rgba32Float,
-            hal::format::Swizzle::NO,
-            images[0].range.clone(),
-        ).expect("Could not create tonemapper input image view");
-
-        let buffer = factory
-            .create_buffer(
-                aux.align,
-                settings.buffer_frame_size() * aux.frames as u64,
-                (
-                    hal::buffer::Usage::UNIFORM,
-                    rendy::memory::MemoryUsageValue::Dynamic,
-                ),
-            )
-            .unwrap();
+        let buffer = factory.create_buffer(
+            BufferInfo {
+                size: settings.buffer_frame_size() * aux.frames as u64,
+                usage: hal::buffer::Usage::UNIFORM,
+            },
+            rendy::memory::MemoryUsageValue::Dynamic,
+        )?;
 
         let mut sets = Vec::with_capacity(frames);
         for index in 0..frames {
             unsafe {
-                let set = descriptor_pool.allocate_set(&set_layouts[0]).unwrap();
+                let set = descriptor_pool.allocate_set(&set_layouts[0].raw())?;
                 factory.write_descriptor_sets(vec![
                     hal::pso::DescriptorSetWrite {
                         set: &set,
-                        binding: 0, 
+                        binding: 0,
                         array_offset: 0,
-                        descriptors: Some(hal::pso::Descriptor::Sampler(
-                            image_sampler.raw(),
-                        )),
+                        descriptors: Some(hal::pso::Descriptor::Sampler(image_sampler.raw())),
                     },
                     hal::pso::DescriptorSetWrite {
                         set: &set,
@@ -271,7 +274,10 @@ where
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Buffer(
                             buffer.raw(),
-                            Some(settings.uniform_offset(index as u64))..Some(settings.uniform_offset(index as u64) + Settings::UNIFORM_SIZE),
+                            Some(settings.uniform_offset(index as u64))
+                                ..Some(
+                                    settings.uniform_offset(index as u64) + Settings::UNIFORM_SIZE,
+                                ),
                         )),
                     },
                 ]);
@@ -289,9 +295,9 @@ where
     }
 }
 
-impl<B> SimpleGraphicsPipeline<B, Aux<B>> for Pipeline<B>
+impl<B> SimpleGraphicsPipeline<B, specs::World> for Pipeline<B>
 where
-    B: gfx_hal::Backend,
+    B: hal::Backend,
 {
     type Desc = PipelineDesc;
 
@@ -299,10 +305,11 @@ where
         &mut self,
         factory: &Factory<B>,
         _queue: QueueId,
-        _set_layouts: &[B::DescriptorSetLayout],
+        _set_layouts: &[Handle<DescriptorSetLayout<B>>],
         index: usize,
-        aux: &Aux<B>,
+        world: &specs::World,
     ) -> PrepareResult {
+        let aux = world.read_resource::<Aux>();
         unsafe {
             factory
                 .upload_visible_buffer(
@@ -322,7 +329,7 @@ where
         layout: &B::PipelineLayout,
         mut encoder: RenderPassEncoder<'_, B>,
         index: usize,
-        _aux: &Aux<B>,
+        _world: &specs::World,
     ) {
         encoder.bind_graphics_descriptor_sets(
             layout,
@@ -337,9 +344,9 @@ where
         encoder.draw(0..3, 0..1);
     }
 
-    fn dispose(mut self, factory: &mut Factory<B>, _aux: &mut Aux<B>) {
+    fn dispose(mut self, factory: &mut Factory<B>, _world: &specs::World) {
         unsafe {
-            self.descriptor_pool.free_sets(self.sets.into_iter());
+            self.descriptor_pool.reset();
             factory.destroy_descriptor_pool(self.descriptor_pool);
         }
     }
