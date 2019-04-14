@@ -7,6 +7,9 @@ edition = "2018"
 [profile.release]
 debug = true
 
+[profile.dev]
+opt-level = 1
+
 [features]
 default = ["rendy"]
 metal = ["rendy/metal"]
@@ -39,7 +42,7 @@ rev = "acf33a93e82aea16fd36e81f9a667d5b2ab064a1"
 
 [dependencies.rendy]
 optional = true
-path = "../rendy/rendy"
+# path = "../rendy/rendy"
 features = ["texture-image"]
-# git = "https://github.com/termhn/rendy"
-# rev = "f84ac11f7bbc632557254b657c7249edb4fe98e2"
+git = "https://github.com/termhn/rendy"
+rev = "f84ac11f7bbc632557254b657c7249edb4fe98e2"
