@@ -12,21 +12,21 @@ pub struct CameraArgs {
     pub camera_pos: nalgebra::Point3<f32>,
 }
 
-impl From<(&components::Camera, &components::Transform)> for CameraArgs {
-    fn from((cam, trans): (&components::Camera, &components::Transform)) -> Self {
+impl From<(&components::Camera, &components::GlobalTransform)> for CameraArgs {
+    fn from((cam, trans): (&components::Camera, &components::GlobalTransform)) -> Self {
         CameraArgs {
             proj: {
                 let mut proj = cam.proj.to_homogeneous();
                 proj[(1, 1)] *= -1.0;
                 proj
             },
-            view: trans.0.inverse().to_homogeneous(),
-            camera_pos: nalgebra::Point3::from(trans.0.isometry.translation.vector),
+            view: trans.0.try_inverse().unwrap(),
+            camera_pos: nalgebra::Point3::from(trans.0.column(3).xyz()),
         }
     }
 }
 
-#[derive(Derivative, Clone, Copy)]
+#[derive(Debug, Derivative, Clone, Copy)]
 #[derivative(Default)]
 #[repr(C)]
 pub struct LightData {

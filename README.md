@@ -10,10 +10,17 @@ other helpers.
 * [x] Point lights
 * [x] Basic `glTF` import
 * [x] HDR rendering with a tone mapping pass
+* [x] More robust `glTF` import
+* [x] Scene format for loading models from multiple glTF files
 * [ ] Diffuse and specular environment mapping
 * [ ] Directional lights
 * [ ] Shadow mapping
-* [ ] More robust `glTF` import
+
+# Scene Description
+
+See `scene.rs` for a description of the scene format, and `assets/scene.ron` for an example. Should be able to load
+data from any PBR metallic-roughness based glTF assets. If you encounter issues, please open a ticket in the issue
+tracker!
 
 # Controls
 
@@ -39,6 +46,8 @@ other helpers.
 
 # Screenshots
 
+![](screenshots/scene1.png)
+![](screenshots/scene2.png)
 ![](screenshots/helmet1.png)
 ![](screenshots/helmet2.png)
 ![](screenshots/helmet3.png)

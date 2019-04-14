@@ -1,0 +1,130 @@
+SceneConfig(
+    gltf_sources: [
+        ("assets/gltf/SciFiHelmet", "SciFiHelmet.gltf"),
+        ("assets/gltf/Corset", "Corset.gltf"),
+        ("assets/gltf/FlightHelmet", "FlightHelmet.gltf"),
+    ],
+    entities: [
+        // SciFi Helmet
+        SceneEntity(
+            transform: Manual((
+                scale: 0.15,
+            )),
+            mesh: Some(Mesh(Index(0, 0))),
+            parent: None,
+        ),
+        // Corset
+        SceneEntity(
+            transform: Manual((
+                translation: (0.5, -0.4, 0.0),
+                scale: 10.0,
+                euler_rotation: (0.0, 3.14159, 0.0),
+            )),
+            mesh: Some(Mesh(Index(1, 0))),
+            parent: None,
+        ),
+        // Flight helmet root
+        SceneEntity(
+            transform: Manual((
+                translation: (-0.5, 0.0, 0.0),
+                euler_rotation: (0.0, 3.14159, 0.0),
+            )),
+        ),
+        // Flight helmet pieces
+        SceneEntity(
+            transform: Gltf(Index(2, 0)),
+            mesh: Some(Node(Index(2, 0))),
+            parent: Some(2),
+        ),
+        SceneEntity(
+            transform: Gltf(Index(2, 1)),
+            mesh: Some(Node(Index(2, 1))),
+            parent: Some(2),
+        ),
+        SceneEntity(
+            transform: Gltf(Index(2, 2)),
+            mesh: Some(Node(Index(2, 2))),
+            parent: Some(2),
+        ),
+        SceneEntity(
+            transform: Gltf(Index(2, 3)),
+            mesh: Some(Node(Index(2, 3))),
+            parent: Some(2),
+        ),
+        SceneEntity(
+            transform: Gltf(Index(2, 4)),
+            mesh: Some(Node(Index(2, 4))),
+            parent: Some(2),
+        ),
+        // Camera
+        SceneEntity(
+            transform: Manual(()),
+            camera: Some(CameraData(
+                yaw: 0.0,
+                pitch: 0.0,
+                distance: 4.0,
+                focus_point: (0.0, 0.0, 0.0),
+                // PI / 6
+                fov: 0.523598333,
+                znear: 0.1,
+                zfar: 200.0,
+                active: true,
+            )),
+        ),
+        // Lights
+        SceneEntity(
+            transform: Manual((
+                translation: (10.0, 10.0, 2.0),
+            )),
+            light: Some((
+                intensity: 150.0,
+                color: (1.0, 0.96, 0.9),
+            )),
+        ),
+        SceneEntity(
+            transform: Manual((
+                translation: (8.0, 10.0, 2.0),
+            )),
+            light: Some((
+                intensity: 150.0,
+                color: (1.0, 0.96, 0.9),
+            )),
+        ),
+        SceneEntity(
+            transform: Manual((
+                translation: (8.0, 10.0, 4.0),
+            )),
+            light: Some((
+                intensity: 150.0,
+                color: (1.0, 0.96, 0.9),
+            )),
+        ),
+        SceneEntity(
+            transform: Manual((
+                translation: (10.0, 10.0, 4.0),
+            )),
+            light: Some((
+                intensity: 150.0,
+                color: (1.0, 0.96, 0.9),
+            )),
+        ),
+        SceneEntity(
+            transform: Manual((
+                translation: (-4.0, 0.0, -5.0),
+            )),
+            light: Some((
+                intensity: 250.0,
+                color: (1.0, 0.96, 0.9),
+            )),
+        ),
+        SceneEntity(
+            transform: Manual((
+                translation: (-5.0, 5.0, -2.0),
+            )),
+            light: Some((
+                intensity: 25.0,
+                color: (1.0, 0.96, 0.9),
+            )),
+        ),
+    ]
+)

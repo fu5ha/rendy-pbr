@@ -10,12 +10,7 @@ use rendy::{
     memory::MemoryUsageValue,
 };
 
-use std::{
-    collections::{HashMap, HashSet},
-    fs::File,
-    path::Path,
-    time,
-};
+use std::{collections::HashSet, time};
 
 use rendy::hal;
 
@@ -27,7 +22,9 @@ mod asset;
 mod components;
 mod input;
 mod node;
+mod scene;
 mod systems;
+mod transform;
 
 pub const CUBEMAP_RES: u32 = 512;
 pub const MAX_LIGHTS: usize = 32;
@@ -53,44 +50,18 @@ fn main() {
         .init();
 
     match run() {
-        Err(e) => log::error!("{}\n\nBACKTRACE:\n{}", e, e.backtrace()),
-        _ => (),
-    }
-}
-
-fn process_node(node: gltf::Node, world: &mut specs::World, base_mesh_index: usize) {
-    if let Some(mesh) = node.mesh() {
-        use gltf::scene::Transform;
-        let node_transform = match node.transform() {
-            Transform::Matrix { .. } => unimplemented!(),
-            Transform::Decomposed {
-                translation,
-                rotation,
-                scale,
-            } => {
-                nalgebra::Similarity3::from_parts(
-                    nalgebra::Translation3::new(translation[0], translation[1], translation[2]),
-                    nalgebra::UnitQuaternion::from_quaternion(nalgebra::Quaternion::new(
-                        rotation[3],
-                        rotation[0],
-                        rotation[1],
-                        rotation[2],
-                    )),
-                    scale.iter().sum::<f32>() / 3.0,
-                )
+        Err(e) => {
+            if let Some(name) = e.name() {
+                log::error!("Exit with {}: {}\n\nBACKTRACE:\n{}", name, e, e.backtrace());
+            } else {
+                log::error!(
+                    "Exit with Unnamed Error: {}\n\nBACKTRACE: {}",
+                    e,
+                    e.backtrace()
+                );
             }
-        };
-
-        log::debug!("Create entity with transform: {}", node_transform);
-
-        world.create_entity()
-            .with(components::Transform(node_transform))
-            .with(components::Mesh(base_mesh_index + mesh.index()))
-        .build();
-    }
-
-    for node in node.children() {
-        process_node(node, world, base_mesh_index);
+        }
+        _ => (),
     }
 }
 
@@ -100,6 +71,8 @@ fn run() -> Result<(), failure::Error> {
     let mut world = specs::World::new();
 
     world.register::<components::Transform>();
+    world.register::<components::GlobalTransform>();
+    world.register::<components::Parent>();
     world.register::<components::Mesh>();
     world.register::<components::Camera>();
     world.register::<components::ActiveCamera>();
@@ -278,79 +251,20 @@ fn run() -> Result<(), failure::Error> {
     pbr_graph_builder
         .add_node(PresentNode::builder(&factory, surface, color).with_dependency(tonemap_pass));
 
-    let (material_storage, primitive_storage, mesh_storage) = {
-        let paths = vec![
-            ("assets/gltf/SciFiHelmet", "SciFiHelmet.gltf"),
-            ("assets/gltf/FlightHelmet", "FlightHelmet.gltf"),
-            ("assets/gltf/Corset", "Corset.gltf")
-        ];
+    // Hierarchy system must be added before loading scene
+    let mut hierarchy_system = specs_hierarchy::HierarchySystem::<components::Parent>::new();
+    specs::System::setup(&mut hierarchy_system, &mut world.res);
+    let mut transform_system = systems::TransformSystem::new();
+    specs::System::setup(&mut transform_system, &mut world.res);
 
-        let mut mesh_storage = Vec::new();
-        let mut primitive_storage = Vec::new();
-        let mut material_storage = Vec::new();
-        for path in paths {
-            let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path.0);
-            let file = File::open(base_path.join(path.1))?;
-            let reader = std::io::BufReader::new(file);
-            let gltf = gltf::Gltf::from_reader(reader)?;
-
-            let gltf_buffers = asset::GltfBuffers::load_from_gltf(&base_path, &gltf)?;
-
-            let base_mesh_index = mesh_storage.len();
-            let base_material_index = material_storage.len();
-            for _ in 0..gltf.meshes().len() {
-                mesh_storage.push(None);
-            }
-            for _ in 0..gltf.materials().len() {
-                material_storage.push(None);
-            }
-
-            for mesh in gltf.meshes() {
-                asset::load_gltf_mesh(
-                    &mesh,
-                    256,
-                    &base_path,
-                    &gltf_buffers,
-                    base_mesh_index,
-                    base_material_index,
-                    &mut material_storage,
-                    &mut primitive_storage,
-                    &mut mesh_storage,
-                    &mut factory,
-                    queue,
-                )?;
-            }
-
-            let scene = gltf.scenes().next().unwrap();
-
-            for node in scene.nodes() {
-                process_node(node, &mut world, base_mesh_index);
-            }
-        }
-
-        let material_storage = asset::MaterialStorage(
-            material_storage
-                .into_iter()
-                .map(|mut m| m.take().unwrap())
-                .collect::<Vec<_>>(),
-        );
-        let primitive_storage = asset::PrimitiveStorage(
-            primitive_storage
-                .into_iter()
-                .map(|mut p| p.take().unwrap())
-                .collect::<Vec<_>>(),
-        );
-        let mesh_storage = asset::MeshStorage(
-            mesh_storage
-                .into_iter()
-                .map(|mut m| m.take().unwrap())
-                .collect::<Vec<_>>(),
-        );
-        (material_storage, primitive_storage, mesh_storage)
-    };
+    // Load scene from config file
+    let scene_config = scene::SceneConfig::from_path("assets/scene.ron")?;
+    let (material_storage, primitive_storage, mesh_storage, _scene_entities) =
+        scene_config.load(aspect, &mut factory, queue, &mut world)?;
 
     let num_meshes = mesh_storage.0.len();
     let num_materials = material_storage.0.len();
+
     let pbr_aux = node::pbr::Aux {
         frames: FRAMES_IN_FLIGHT as _,
         align,
@@ -361,46 +275,6 @@ fn run() -> Result<(), failure::Error> {
         },
     };
 
-    let camera = components::Camera {
-        yaw: 0.0,
-        pitch: 0.0,
-        dist: 4.0,
-        focus: nalgebra::Point3::new(0.0, 0.0, 0.0),
-        proj: nalgebra::Perspective3::new(aspect, 3.1415 / 6.0, 0.1, 200.0),
-    };
-
-    world
-        .create_entity()
-        .with(camera)
-        .with(components::ActiveCamera)
-        .with(components::Transform(nalgebra::Similarity3::from_parts(
-            nalgebra::Translation3::new(0.0, 0.0, 4.0),
-            nalgebra::UnitQuaternion::identity(),
-            1.0,
-        )))
-        .build();
-    let light_pos_intensities = vec![
-        (nalgebra::Vector3::new(10.0, 10.0, 2.0), 150.0),
-        (nalgebra::Vector3::new(8.0, 10.0, 2.0), 150.0),
-        (nalgebra::Vector3::new(8.0, 10.0, 4.0), 150.0),
-        (nalgebra::Vector3::new(10.0, 10.0, 4.0), 150.0),
-        (nalgebra::Vector3::new(-4.0, 0.0, -5.0), 250.0),
-        (nalgebra::Vector3::new(-5.0, 5.0, -2.0), 25.0),
-    ];
-
-    for (pos, intensity) in light_pos_intensities.into_iter() {
-        world
-            .create_entity()
-            .with(components::Light {
-                intensity,
-                color: [1.0, 1.0, 1.0],
-            })
-            .with(components::Transform(
-                nalgebra::Similarity3::identity() * nalgebra::Translation3::from(pos),
-            ))
-            .build();
-    }
-
     // Add specs resources
     world.add_resource(pbr_aux);
     world.add_resource(input);
@@ -408,7 +282,7 @@ fn run() -> Result<(), failure::Error> {
     world.add_resource(material_storage);
     world.add_resource(primitive_storage);
     world.add_resource(mesh_storage);
-    world.add_resource(systems::HelmetArraySize{ x: 0, y: 0, z: 0 });
+    world.add_resource(systems::HelmetArraySize { x: 0, y: 0, z: 0 });
     world.add_resource(systems::HelmetArrayEntities(Vec::new()));
     world.add_resource(systems::MeshInstanceStorage(Default::default()));
     world.add_resource(systems::InstanceCache {
@@ -418,10 +292,6 @@ fn run() -> Result<(), failure::Error> {
         material_bitsets: vec![specs::BitSet::new(); num_materials],
     });
 
-    let mut pbr_graph = pbr_graph_builder
-        .with_frames_in_flight(FRAMES_IN_FLIGHT)
-        .build(&mut factory, &mut families, &mut world)?;
-
     let instance_cache_update_system = {
         let mut mesh_storage = world.write_storage::<components::Mesh>();
 
@@ -429,7 +299,7 @@ fn run() -> Result<(), failure::Error> {
             frames_in_flight: FRAMES_IN_FLIGHT as usize,
             previous_frame: FRAMES_IN_FLIGHT as usize - 1,
             transform_reader_id: world
-                .write_storage::<components::Transform>()
+                .write_storage::<components::GlobalTransform>()
                 .register_reader(),
             mesh_reader_id: mesh_storage.register_reader(),
             dirty_entities_scratch: specs::BitSet::new(),
@@ -444,17 +314,39 @@ fn run() -> Result<(), failure::Error> {
 
     let mut dispatcher = DispatcherBuilder::new()
         .with(systems::CameraInputSystem, "camera_input_system", &[])
-        .with(systems::PbrAuxInputSystem {
-            helmet_mesh: 0 as asset::MeshHandle,
-        }, "pbr_aux_input_system", &[])
-        .with(systems::HelmetArraySizeUpdateSystem {
-            curr_size: Default::default(),
-            helmet_mesh: 0 as asset::MeshHandle,
-        }, "helmet_array_size_update_system", &["pbr_aux_input_system"])
+        .with(
+            systems::PbrAuxInputSystem {
+                helmet_mesh: 0 as asset::MeshHandle,
+            },
+            "pbr_aux_input_system",
+            &[],
+        )
+        .with(
+            systems::HelmetArraySizeUpdateSystem {
+                curr_size: Default::default(),
+                helmet_mesh: 0 as asset::MeshHandle,
+            },
+            "helmet_array_size_update_system",
+            &["pbr_aux_input_system"],
+        )
+        .with(
+            hierarchy_system,
+            "transform_hierarchy_system",
+            &[
+                "helmet_array_size_update_system",
+                "pbr_aux_input_system",
+                "camera_input_system",
+            ],
+        )
+        .with(
+            transform_system,
+            "transform_system",
+            &["transform_hierarchy_system"],
+        )
         .with(
             instance_cache_update_system,
             "instance_cache_update_system",
-            &["helmet_array_size_update_system"],
+            &["transform_system"],
         )
         .with(
             systems::InputSystem,
@@ -462,6 +354,10 @@ fn run() -> Result<(), failure::Error> {
             &["pbr_aux_input_system", "camera_input_system"],
         )
         .build();
+
+    let mut pbr_graph = pbr_graph_builder
+        .with_frames_in_flight(FRAMES_IN_FLIGHT)
+        .build(&mut factory, &mut families, &mut world)?;
 
     let started = time::Instant::now();
 
@@ -474,6 +370,7 @@ fn run() -> Result<(), failure::Error> {
         let start = frames.start;
         for _ in &mut frames {
             factory.maintain(&mut families);
+            world.maintain();
             {
                 let mut event_bucket = world.write_resource::<input::EventBucket>();
                 event_bucket.0.clear();
@@ -490,8 +387,6 @@ fn run() -> Result<(), failure::Error> {
             }
 
             dispatcher.dispatch(&mut world.res);
-
-            world.maintain();
 
             pbr_graph.run(&mut factory, &mut families, &mut world);
 

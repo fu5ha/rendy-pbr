@@ -1,18 +1,9 @@
 use crate::asset;
 
+use serde::Deserialize;
 use specs::prelude::*;
 
-pub struct Transform(pub nalgebra::Similarity3<f32>);
-
-impl Default for Transform {
-    fn default() -> Self {
-        Transform(nalgebra::Similarity3::identity())
-    }
-}
-
-impl Component for Transform {
-    type Storage = FlaggedStorage<Self, VecStorage<Self>>;
-}
+pub use crate::transform::components::*;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Camera {
@@ -27,7 +18,7 @@ impl Component for Camera {
     type Storage = FlaggedStorage<Self, HashMapStorage<Self>>;
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct Light {
     pub intensity: f32,
     pub color: [f32; 3],
