@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Gray Olson <gray@grayolson.com>"]
 edition = "2018"
 
+[profile.release]
+debug = true
+
 [features]
 default = ["rendy"]
 metal = ["rendy/metal"]
@@ -13,7 +16,7 @@ empty = ["rendy/empty"]
 
 [dependencies]
 genmesh = "0.6"
-nalgebra = "0.17"
+nalgebra = { version = "0.17" }
 env_logger = "0.5"
 failure = "0.1"
 lazy_static = "1.0"
@@ -24,7 +27,10 @@ palette = "0.4"
 rand = "0.6"
 derivative = "1.0"
 specs = "0.14"
+specs-hierarchy = "0.3"
 hibitset = "0.5"
+ron = "0.5"
+serde = "1.0"
 
 [dependencies.gltf]
 git = "https://github.com/gltf-rs/gltf"
@@ -33,7 +39,7 @@ rev = "acf33a93e82aea16fd36e81f9a667d5b2ab064a1"
 
 [dependencies.rendy]
 optional = true
-# path = "../rendy/rendy"
+path = "../rendy/rendy"
 features = ["texture-image"]
-git = "https://github.com/termhn/rendy"
-rev = "f84ac11f7bbc632557254b657c7249edb4fe98e2"
+# git = "https://github.com/termhn/rendy"
+# rev = "f84ac11f7bbc632557254b657c7249edb4fe98e2"
