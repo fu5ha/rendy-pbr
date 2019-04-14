@@ -1,3 +1,5 @@
+//! A simple scene description format which allows loading models (meshes) and transforms
+//! from multiple glTF files, as well as to define a scene graph hierarchy and cameras and lights.
 use crate::{asset, components};
 
 use rendy::hal;
@@ -10,15 +12,95 @@ use std::{
     path::Path,
 };
 
+/// The path to the base directory of a glTF asset
 pub type BasePath = String;
+/// The name of the glTF root file inside the base directory
 pub type Filename = String;
 
+/// An index of a glTF source file, within the list of source files for the scene
 pub type GltfFileIndex = usize;
 
+/// The root scene configuration. Consists of a list of glTF source files and then
+/// a list of entities in the scene.
 #[derive(Debug, Deserialize)]
 pub struct SceneConfig {
     pub gltf_sources: Vec<(BasePath, Filename)>,
     pub entities: Vec<SceneEntity>,
+}
+
+/// The index of an entity in the SceneEntity list of the scene config
+pub type SceneEntityIndex = usize;
+
+/// An entity in the scene. Must have a transform, and can optionally have
+/// a parent, mesh, light, and camera components.
+#[derive(Debug, Deserialize)]
+pub struct SceneEntity {
+    /// The transform of this entity. Can either be specified manually in the scene config file
+    /// or inherited from a node in one of the glTF source files.
+    transform: TransformSource,
+    /// The parent of this entity. This entity's transform will be relative to the parent,
+    /// if there is one.
+    parent: Option<SceneEntityIndex>,
+    /// The mesh of this entity. Mesh is used in the glTF sense, which means a mesh contains multiple
+    /// 'primitives', which are each a set of vertex data and an associated material. A mesh can either
+    /// be loaded from the index of the mesh in the glTF source file, or from the index of a node in the
+    /// glTF file.
+    mesh: Option<MeshSource>,
+    /// Designates this entity as a light, with an intensity and color
+    light: Option<components::Light>,
+    /// Designates this entity as a camera, with associated camera parameters
+    camera: Option<CameraData>,
+}
+
+/// The source of the transform.
+#[derive(Debug, Deserialize)]
+pub enum TransformSource {
+    /// Load the transform of a node in one of the source glTF files
+    Gltf(GltfNode),
+    /// Define the transform manually
+    Manual(components::Transform),
+}
+
+/// The source of the mesh data
+#[derive(Debug, Deserialize)]
+pub enum MeshSource {
+    /// A node in a glTF source file (must have an associated mesh)
+    Node(GltfNode),
+    /// A mesh in a glTF source file
+    Mesh(GltfMesh),
+}
+
+/// Data for the camera. This is an orbiting camera which orbits at a distance
+/// around a focus point.
+#[derive(Debug, Deserialize)]
+pub struct CameraData {
+    pub yaw: f32,
+    pub pitch: f32,
+    pub distance: f32,
+    pub focus_point: [f32; 3],
+    pub fov: f32,
+    pub znear: f32,
+    pub zfar: f32,
+    /// Whether this is thet active (primary) camera. There can only be one active camera at a time.
+    pub active: bool,
+}
+
+/// A glTF node in one of the source files.
+#[derive(Debug, Deserialize)]
+pub enum GltfNode {
+    /// Fetch the node by its index in the source file
+    Index(GltfFileIndex, usize),
+    /// Fetch the node by its name in the source file
+    Name(GltfFileIndex, String),
+}
+
+/// A glTF mesh in one of the source files
+#[derive(Debug, Deserialize)]
+pub enum GltfMesh {
+    /// Fetch the mesh by its index in the source file
+    Index(GltfFileIndex, usize),
+    /// Fetch the mesh by its name in the source file
+    Name(GltfFileIndex, String),
 }
 
 impl SceneConfig {
@@ -237,12 +319,6 @@ impl SceneConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub enum GltfNode {
-    Index(GltfFileIndex, usize),
-    Name(GltfFileIndex, String),
-}
-
 impl From<&GltfNode> for GltfFileIndex {
     fn from(node: &GltfNode) -> Self {
         match node {
@@ -297,45 +373,4 @@ impl<'a> TryFrom<GltfNodeWrapper<'a>> for gltf::Node<'a> {
                 ))?),
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-pub enum GltfMesh {
-    Index(GltfFileIndex, usize),
-    Name(GltfFileIndex, String),
-}
-
-#[derive(Debug, Deserialize)]
-pub enum TransformSource {
-    Gltf(GltfNode),
-    Manual(components::Transform),
-}
-
-#[derive(Debug, Deserialize)]
-pub enum MeshSource {
-    Node(GltfNode),
-    Mesh(GltfMesh),
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CameraData {
-    pub yaw: f32,
-    pub pitch: f32,
-    pub distance: f32,
-    pub focus_point: [f32; 3],
-    pub fov: f32,
-    pub znear: f32,
-    pub zfar: f32,
-    pub active: bool,
-}
-
-pub type SceneEntityIndex = usize;
-
-#[derive(Debug, Deserialize)]
-pub struct SceneEntity {
-    parent: Option<SceneEntityIndex>,
-    transform: TransformSource,
-    mesh: Option<MeshSource>,
-    light: Option<components::Light>,
-    camera: Option<CameraData>,
 }
