@@ -31,6 +31,7 @@ impl SceneConfig {
 
     pub fn load<B: hal::Backend>(
         mut self,
+        aspect: f32,
         factory: &mut rendy::factory::Factory<B>,
         queue: rendy::command::QueueId,
         world: &mut specs::World,
@@ -97,10 +98,23 @@ impl SceneConfig {
             ))
         }
 
+        let mut active_camera_de = false;
         for (i, scene_entity) in self.entities.iter().enumerate() {
             let mut entity_builder = world.create_entity();
-            match &scene_entity.data {
-                Data::Combined(gltf_node) => {
+
+            let transform = match &scene_entity.transform {
+                TransformSource::Gltf(gltf_node) => {
+                    let src: GltfFileIndex = gltf_node.into();
+                    let node: gltf::Node =
+                        GltfNodeWrapper::from((&gltfs[src], gltf_node)).try_into()?;
+                    components::Transform::from(node.transform())
+                }
+                TransformSource::Manual(transform) => transform.clone(),
+            };
+            entity_builder = entity_builder.with(transform);
+
+            match &scene_entity.mesh {
+                Some(MeshSource::Node(gltf_node)) => {
                     let src: GltfFileIndex = gltf_node.into();
                     if src >= gltfs.len() {
                         failure::bail!("Data source Gltf File for entity: {} out of bounds", i);
@@ -111,62 +125,77 @@ impl SceneConfig {
                         "Entity with Combined data refers to node with no Mesh: {:?}",
                         gltf_node
                     ))?;
-                    let transform = components::Transform::from(node.transform());
-                    entity_builder = entity_builder.with(transform).with(components::Mesh(
+                    entity_builder = entity_builder.with(components::Mesh(
                         gltf_file_offsets[src].0 + node_mesh.index(),
                     ));
                 }
-                Data::Separate { mesh, transform } => {
-                    if let Some(mesh) = mesh {
-                        let mesh = match mesh {
-                            GltfMesh::Index(src, idx) => components::Mesh(
-                                gltfs[*src]
-                                    .meshes()
-                                    .nth(*idx)
-                                    .ok_or(failure::format_err!(
-                                        "GltfMesh refers to mesh that does not exist: {:?}",
-                                        mesh
-                                    ))?
-                                    .index()
-                                    + gltf_file_offsets[*src].1,
-                            ),
-                            GltfMesh::Name(src, name) => components::Mesh(
-                                gltfs[*src]
-                                    .meshes()
-                                    .find(|mesh| {
-                                        if let Some(mesh_name) = mesh.name() {
-                                            if mesh_name == name {
-                                                true
-                                            } else {
-                                                false
-                                            }
+                Some(MeshSource::Mesh(mesh)) => {
+                    let mesh = match mesh {
+                        GltfMesh::Index(src, idx) => components::Mesh(
+                            gltfs[*src]
+                                .meshes()
+                                .nth(*idx)
+                                .ok_or(failure::format_err!(
+                                    "GltfMesh refers to mesh that does not exist: {:?}",
+                                    mesh
+                                ))?
+                                .index()
+                                + gltf_file_offsets[*src].1,
+                        ),
+                        GltfMesh::Name(src, name) => components::Mesh(
+                            gltfs[*src]
+                                .meshes()
+                                .find(|mesh| {
+                                    if let Some(mesh_name) = mesh.name() {
+                                        if mesh_name == name {
+                                            true
                                         } else {
                                             false
                                         }
-                                    })
-                                    .ok_or(failure::format_err!(
-                                        "GltfMesh refers to mesh that does not exist: {:?}",
-                                        mesh
-                                    ))?
-                                    .index()
-                                    + gltf_file_offsets[*src].1,
-                            ),
-                        };
-                        entity_builder = entity_builder.with(mesh);
-                    }
-
-                    let transform = match transform {
-                        TransformSource::Gltf(gltf_node) => {
-                            let src: GltfFileIndex = gltf_node.into();
-                            let node: gltf::Node =
-                                GltfNodeWrapper::from((&gltfs[src], gltf_node)).try_into()?;
-                            components::Transform::from(node.transform())
-                        }
-                        TransformSource::Manual(transform) => transform.clone(),
+                                    } else {
+                                        false
+                                    }
+                                })
+                                .ok_or(failure::format_err!(
+                                    "GltfMesh refers to mesh that does not exist: {:?}",
+                                    mesh
+                                ))?
+                                .index()
+                                + gltf_file_offsets[*src].1,
+                        ),
                     };
-                    entity_builder = entity_builder.with(transform);
+                    entity_builder = entity_builder.with(mesh);
+                }
+                None => (),
+            }
+
+            if let Some(light) = &scene_entity.light {
+                entity_builder = entity_builder.with(*light);
+            }
+
+            if let Some(camera_data) = &scene_entity.camera {
+                entity_builder = entity_builder.with(components::Camera {
+                    yaw: camera_data.yaw,
+                    pitch: camera_data.pitch,
+                    dist: camera_data.distance,
+                    focus: nalgebra::Point3::from(camera_data.focus_point),
+                    proj: nalgebra::Perspective3::new(
+                        aspect,
+                        camera_data.fov,
+                        camera_data.znear,
+                        camera_data.zfar,
+                    ),
+                });
+                if camera_data.active {
+                    if !active_camera_de {
+                        active_camera_de = true;
+                        entity_builder = entity_builder.with(components::ActiveCamera);
+                    } else {
+                        failure::bail!("Attempted to load multiple active cameras");
+                    }
                 }
             }
+
             scene_entities.push(entity_builder.build());
         }
 
@@ -271,24 +300,33 @@ impl<'a> TryFrom<GltfNodeWrapper<'a>> for gltf::Node<'a> {
 }
 
 #[derive(Debug, Deserialize)]
-pub enum TransformSource {
-    Gltf(GltfNode),
-    Manual(components::Transform),
-}
-
-#[derive(Debug, Deserialize)]
 pub enum GltfMesh {
     Index(GltfFileIndex, usize),
     Name(GltfFileIndex, String),
 }
 
 #[derive(Debug, Deserialize)]
-pub enum Data {
-    Combined(GltfNode),
-    Separate {
-        transform: TransformSource,
-        mesh: Option<GltfMesh>,
-    },
+pub enum TransformSource {
+    Gltf(GltfNode),
+    Manual(components::Transform),
+}
+
+#[derive(Debug, Deserialize)]
+pub enum MeshSource {
+    Node(GltfNode),
+    Mesh(GltfMesh),
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CameraData {
+    pub yaw: f32,
+    pub pitch: f32,
+    pub distance: f32,
+    pub focus_point: [f32; 3],
+    pub fov: f32,
+    pub znear: f32,
+    pub zfar: f32,
+    pub active: bool,
 }
 
 pub type SceneEntityIndex = usize;
@@ -296,5 +334,8 @@ pub type SceneEntityIndex = usize;
 #[derive(Debug, Deserialize)]
 pub struct SceneEntity {
     parent: Option<SceneEntityIndex>,
-    data: Data,
+    transform: TransformSource,
+    mesh: Option<MeshSource>,
+    light: Option<components::Light>,
+    camera: Option<CameraData>,
 }

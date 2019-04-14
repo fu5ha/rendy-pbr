@@ -1,5 +1,6 @@
 use crate::asset;
 
+use serde::Deserialize;
 use specs::prelude::*;
 
 pub use crate::transform::components::*;
@@ -17,7 +18,7 @@ impl Component for Camera {
     type Storage = FlaggedStorage<Self, HashMapStorage<Self>>;
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct Light {
     pub intensity: f32,
     pub color: [f32; 3],
