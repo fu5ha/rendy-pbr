@@ -255,7 +255,6 @@ where
         let material_storage = world.read_resource::<asset::MaterialStorage<B>>();
 
         let num_mats = material_storage.0.len();
-        log::debug!("Num mats: {}", num_mats);
         let mut descriptor_pool = unsafe {
             factory.create_descriptor_pool(
                 frames + num_mats,
@@ -405,7 +404,7 @@ where
         use specs::{prelude::*, storage::UnprotectedStorage};
 
         let lights = world.read_storage::<components::Light>();
-        let transforms = world.read_storage::<components::Transform>();
+        let transforms = world.read_storage::<components::GlobalTransform>();
 
         let mut n_lights = 0;
         let mut lights_data = [Default::default(); crate::MAX_LIGHTS];
@@ -415,7 +414,7 @@ where
             }
 
             lights_data[n_lights] = super::LightData {
-                pos: transform.0 * nalgebra::Point3::<f32>::origin(),
+                pos: nalgebra::Point3::from(transform.0.column(3).xyz()),
                 color: light.color,
                 intensity: light.intensity,
                 _pad: 0f32,
@@ -499,18 +498,18 @@ where
             )
                 .join()
             {
-                let systems::MeshInstance { mesh, instance } = unsafe { mesh_instance_storage.0.get(entity.id()) };
-                let start = self
-                    .settings
-                    .instance_transform_offset(*mesh, *instance);
+                let systems::MeshInstance { mesh, instance } =
+                    unsafe { mesh_instance_storage.0.get(entity.id()) };
+                let start = self.settings.instance_transform_offset(*mesh, *instance);
                 unsafe {
-                    transforms_mapped
+                    let mut writer = transforms_mapped
                         .write(
                             factory.device(),
                             start..(start + size_of::<Transform>() as u64),
                         )
-                        .unwrap()
-                        .write(&[transform.0.to_homogeneous()]);
+                        .unwrap();
+
+                    writer.write(&[transform.0]);
                 }
             }
         }

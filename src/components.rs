@@ -2,17 +2,7 @@ use crate::asset;
 
 use specs::prelude::*;
 
-pub struct Transform(pub nalgebra::Similarity3<f32>);
-
-impl Default for Transform {
-    fn default() -> Self {
-        Transform(nalgebra::Similarity3::identity())
-    }
-}
-
-impl Component for Transform {
-    type Storage = FlaggedStorage<Self, VecStorage<Self>>;
-}
+pub use crate::transform::components::*;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Camera {

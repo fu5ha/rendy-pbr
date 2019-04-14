@@ -164,9 +164,10 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                 .build(queue, factory)?;
 
             let material = primitive.material();
-            let mat_idx = base_material_index + material
-                .index()
-                .ok_or(format_err!("Default material unimplemented"))?;
+            let mat_idx = base_material_index
+                + material
+                    .index()
+                    .ok_or(format_err!("Default material unimplemented"))?;
 
             if let None = material_storage[mat_idx] {
                 let pbr_met_rough = material.pbr_metallic_roughness();
@@ -248,14 +249,6 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
         });
 
         Ok(mesh_idx as MeshHandle)
-    }
-}
-
-fn gltf_texture_uri(texture: gltf::Texture<'_>) -> String {
-    if let gltf::image::Source::Uri { uri, .. } = texture.source().source() {
-        String::from(uri)
-    } else {
-        unimplemented!();
     }
 }
 

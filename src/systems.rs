@@ -5,6 +5,8 @@ use specs::{prelude::*, storage::UnprotectedStorage};
 
 use std::collections::HashSet;
 
+pub use crate::transform::systems::*;
+
 pub struct InputSystem;
 
 impl<'a> System<'a> for InputSystem {
@@ -26,7 +28,6 @@ pub struct PbrAuxInputSystem {
     pub helmet_mesh: asset::MeshHandle,
 }
 
-
 impl<'a> System<'a> for PbrAuxInputSystem {
     type SystemData = (
         Read<'a, input::EventBucket>,
@@ -36,7 +37,10 @@ impl<'a> System<'a> for PbrAuxInputSystem {
         Write<'a, HelmetArraySize>,
     );
 
-    fn run(&mut self, (events, input, mesh_storage, mut aux, mut helmet_array_size): Self::SystemData) {
+    fn run(
+        &mut self,
+        (events, input, mesh_storage, mut aux, mut helmet_array_size): Self::SystemData,
+    ) {
         use input::MouseState;
         use winit::{ElementState, ModifiersState, VirtualKeyCode, WindowEvent};
 
@@ -165,14 +169,18 @@ impl<'a> System<'a> for CameraInputSystem {
         WriteStorage<'a, components::Camera>,
     );
 
-    fn run(&mut self, (events, input, mut transforms, active_cameras, mut cameras): Self::SystemData) {
+    fn run(
+        &mut self,
+        (events, input, mut transforms, active_cameras, mut cameras): Self::SystemData,
+    ) {
         use input::{
             MouseState, ROTATE_SENSITIVITY, TRANSLATE_SENSITIVITY, ZOOM_MOUSE_SENSITIVITY,
             ZOOM_SCROLL_SENSITIVITY,
         };
         use winit::{DeviceEvent, ElementState, ModifiersState, MouseScrollDelta};
-        if let Some((_, transform, camera)) =
-            (&active_cameras, &mut transforms, &mut cameras).join().next()
+        if let Some((_, transform, camera)) = (&active_cameras, &mut transforms, &mut cameras)
+            .join()
+            .next()
         {
             let mut input = (*input).clone();
             for event in events.0.iter() {
@@ -256,7 +264,10 @@ impl<'a> System<'a> for CameraInputSystem {
             transform.0 = Similarity3::from_parts(
                 nalgebra::Translation::from(eye.coords.clone()),
                 // Invert direction for right handed
-                nalgebra::UnitQuaternion::face_towards(&(eye - camera.focus), &nalgebra::Vector3::y()),
+                nalgebra::UnitQuaternion::face_towards(
+                    &(eye - camera.focus),
+                    &nalgebra::Vector3::y(),
+                ),
                 1.0,
             );
         }
@@ -270,7 +281,7 @@ pub struct HelmetArrayEntities(pub Vec<Entity>);
 pub struct HelmetArraySize {
     pub x: u8,
     pub y: u8,
-    pub z: u8
+    pub z: u8,
 }
 
 impl HelmetArraySize {
@@ -360,7 +371,7 @@ impl<'a> System<'a> for HelmetArraySizeUpdateSystem {
             helmet_array_size,
             mut transforms,
             mut meshes,
-        ): Self::SystemData
+        ): Self::SystemData,
     ) {
         if *helmet_array_size != self.curr_size {
             while helmet_array_entities.0.len() < helmet_array_size.size() {
@@ -373,7 +384,10 @@ impl<'a> System<'a> for HelmetArraySizeUpdateSystem {
                 transforms.remove(entity);
             }
             let new_helmet_transforms = helmet_array_size.generate_transforms();
-            for (transform, entity) in new_helmet_transforms.into_iter().zip(helmet_array_entities.0.iter()) {
+            for (transform, entity) in new_helmet_transforms
+                .into_iter()
+                .zip(helmet_array_entities.0.iter())
+            {
                 if let Ok(entry) = transforms.entry(*entity) {
                     let entity_transform = entry.or_insert(Default::default());
                     entity_transform.0 = transform
@@ -425,7 +439,7 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
         Write<'a, MeshInstanceStorage>,
         Read<'a, asset::PrimitiveStorage<B>>,
         ReadStorage<'a, components::Mesh>,
-        ReadStorage<'a, components::Transform>,
+        ReadStorage<'a, components::GlobalTransform>,
     );
 
     fn run(
@@ -454,7 +468,7 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
                     ComponentEvent::Removed(id) => {
                         self.mesh_deleted.add(*id);
                     }
-                    _ => ()
+                    _ => (),
                 };
             }
         }
@@ -473,20 +487,15 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
             }
         }
         for (entity, _) in (&entities, &self.mesh_deleted).join() {
-            let MeshInstance { mesh, instance } = unsafe { mesh_instance_storage.0.remove(entity.id()) };
+            let MeshInstance { mesh, instance } =
+                unsafe { mesh_instance_storage.0.remove(entity.id()) };
             self.mesh_entity_bitsets[mesh].remove(entity.id());
             cache.mesh_instance_counts[mesh] -= 1;
-            log::debug!("Mesh instance count: {}", cache.mesh_instance_counts[mesh]);
             for primitive_idx in mesh_storage.0[mesh].primitives.iter() {
                 let primitive = &primitive_storage.0[*primitive_idx];
                 cache.material_bitsets[primitive.mat].remove(entity.id());
             }
-            for (entity, _) in (
-                &entities,
-                &self.mesh_entity_bitsets[mesh],
-            )
-                .join()
-            {
+            for (entity, _) in (&entities, &self.mesh_entity_bitsets[mesh]).join() {
                 let mesh_instance = unsafe { mesh_instance_storage.0.get_mut(entity.id()) };
                 if mesh_instance.instance > instance {
                     mesh_instance.instance -= 1;
@@ -496,18 +505,16 @@ impl<'a, B: hal::Backend> System<'a> for InstanceCacheUpdateSystem<B> {
             self.dirty_mesh_indirects_scratch.insert(mesh);
         }
         for (entity, mesh, _) in (&entities, &meshes, &self.mesh_inserted).join() {
-            unsafe { 
-                mesh_instance_storage.0
-                    .insert(
-                        entity.id(),
-                        MeshInstance {
-                            mesh: mesh.0,
-                            instance: cache.mesh_instance_counts[mesh.0] as InstanceIndex,
-                        }
-                    );
+            unsafe {
+                mesh_instance_storage.0.insert(
+                    entity.id(),
+                    MeshInstance {
+                        mesh: mesh.0,
+                        instance: cache.mesh_instance_counts[mesh.0] as InstanceIndex,
+                    },
+                );
             }
             cache.mesh_instance_counts[mesh.0] += 1;
-            log::debug!("Mesh instance count: {}", cache.mesh_instance_counts[mesh.0]);
             for primitive_idx in mesh_storage.0[mesh.0].primitives.iter() {
                 let primitive = &primitive_storage.0[*primitive_idx];
                 cache.material_bitsets[primitive.mat].add(entity.id());
