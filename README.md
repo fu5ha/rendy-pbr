@@ -16,6 +16,12 @@ other helpers.
 * [ ] Directional lights
 * [ ] Shadow mapping
 
+# Scene Description
+
+See `scene.rs` for a description of the scene format, and `assets/scene.ron` for an example. Should be able to load
+data from any PBR metallic-roughness based glTF assets. If you encounter issues, please open a ticket in the issue
+tracker!
+
 # Controls
 
 ### Navigation
