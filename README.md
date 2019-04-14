@@ -10,10 +10,11 @@ other helpers.
 * [x] Point lights
 * [x] Basic `glTF` import
 * [x] HDR rendering with a tone mapping pass
+* [x] More robust `glTF` import
+* [x] Scene format for loading models from multiple glTF files
 * [ ] Diffuse and specular environment mapping
 * [ ] Directional lights
 * [ ] Shadow mapping
-* [ ] More robust `glTF` import
 
 # Controls
 
