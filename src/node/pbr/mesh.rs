@@ -129,17 +129,16 @@ impl Settings {
     }
 
     #[inline]
-    fn mesh_transforms_offset(&self, mesh_index: usize) -> u64 {
+    fn mesh_transforms_index(&self, mesh_index: usize) -> usize {
         self.max_mesh_instances[0..mesh_index]
             .iter()
-            .map(|n| *n as u64)
-            .sum::<u64>()
-            * size_of::<Transform>() as u64
+            .map(|n| *n as usize)
+            .sum::<usize>()
     }
 
     #[inline]
-    fn instance_transform_offset(&self, mesh_index: usize, instance: u16) -> u64 {
-        self.mesh_transforms_offset(mesh_index) + size_of::<Transform>() as u64 * instance as u64
+    fn instance_transform_index(&self, mesh_index: usize, instance: u16) -> usize {
+        self.mesh_transforms_index(mesh_index) + instance as usize
     }
 
     #[inline]
@@ -449,12 +448,19 @@ where
         let primitive_storage = world.read_resource::<asset::PrimitiveStorage<B>>();
 
         let indirect_offset = self.settings.indirect_offset(index as u64);
-        let indirect_end = indirect_offset + self.settings.indirect_size();
+        let indirect_size = self.settings.indirect_size();
+        let indirect_end = indirect_offset + indirect_size;
         {
             let mut indirects_mapped = self
                 .uniform_indirect_buffer
                 .map(factory.device(), indirect_offset..indirect_end)
                 .unwrap();
+            let mut indirects_writer = unsafe {
+                indirects_mapped
+                    .write(factory.device(), 0..indirect_size)
+                    .unwrap()
+            };
+            let indirects_slice = unsafe { indirects_writer.slice() };
 
             for dirty_mesh in instance_cache.dirty_mesh_indirects[index].iter() {
                 for prim_index in mesh_storage.0[*dirty_mesh].primitives.iter() {
@@ -466,16 +472,7 @@ where
                         first_instance: 0,
                     };
 
-                    let start = self.settings.primitive_indirect_offset(*prim_index);
-                    unsafe {
-                        indirects_mapped
-                            .write(
-                                factory.device(),
-                                start..(start + size_of::<DrawIndexedCommand>() as u64),
-                            )
-                            .unwrap()
-                            .write(&[command]);
-                    }
+                    indirects_slice[*prim_index] = command;
                 }
             }
         }
@@ -484,12 +481,19 @@ where
         let entities = world.entities();
 
         let transforms_offset = self.settings.transforms_offset(index as u64);
+        let transforms_size = self.settings.transform_size();
         let transforms_end = transforms_offset + self.settings.transform_size();
         {
             let mut transforms_mapped = self
                 .transform_buffer
                 .map(factory.device(), transforms_offset..transforms_end)
                 .unwrap();
+            let mut transforms_writer = unsafe {
+                transforms_mapped
+                    .write(factory.device(), 0..transforms_size)
+                    .unwrap()
+            };
+            let transforms_slice = unsafe { transforms_writer.slice() };
 
             for (entity, transform, _) in (
                 &entities,
@@ -500,17 +504,8 @@ where
             {
                 let systems::MeshInstance { mesh, instance } =
                     unsafe { mesh_instance_storage.0.get(entity.id()) };
-                let start = self.settings.instance_transform_offset(*mesh, *instance);
-                unsafe {
-                    let mut writer = transforms_mapped
-                        .write(
-                            factory.device(),
-                            start..(start + size_of::<Transform>() as u64),
-                        )
-                        .unwrap();
-
-                    writer.write(&[transform.0]);
-                }
+                let idx = self.settings.instance_transform_index(*mesh, *instance);
+                transforms_slice[idx] = transform.0;
             }
         }
 
@@ -550,7 +545,8 @@ where
                     std::iter::once((
                         self.transform_buffer.raw(),
                         transforms_offset
-                            + self.settings.mesh_transforms_offset(primitive.mesh_handle),
+                            + self.settings.mesh_transforms_index(primitive.mesh_handle) as u64
+                                * size_of::<Transform>() as u64,
                     )),
                 );
                 encoder.draw_indexed_indirect(
