@@ -257,9 +257,10 @@ fn run() -> Result<(), failure::Error> {
     let mut transform_system = systems::TransformSystem::new();
     specs::System::setup(&mut transform_system, &mut world.res);
 
+    // Load scene from config file
     let scene_config = scene::SceneConfig::from_path("assets/scene.ron")?;
     let (material_storage, primitive_storage, mesh_storage, _scene_entities) =
-        scene_config.load(&mut factory, queue, &mut world)?;
+        scene_config.load(aspect, &mut factory, queue, &mut world)?;
 
     let num_meshes = mesh_storage.0.len();
     let num_materials = material_storage.0.len();
@@ -273,46 +274,6 @@ fn run() -> Result<(), failure::Error> {
             comparison_factor: 0.5,
         },
     };
-
-    let camera = components::Camera {
-        yaw: 0.0,
-        pitch: 0.0,
-        dist: 4.0,
-        focus: nalgebra::Point3::new(0.0, 0.0, 0.0),
-        proj: nalgebra::Perspective3::new(aspect, 3.1415 / 6.0, 0.1, 200.0),
-    };
-
-    world
-        .create_entity()
-        .with(camera)
-        .with(components::ActiveCamera)
-        .with(components::Transform(nalgebra::Similarity3::from_parts(
-            nalgebra::Translation3::new(0.0, 0.0, 4.0),
-            nalgebra::UnitQuaternion::identity(),
-            1.0,
-        )))
-        .build();
-    let light_pos_intensities = vec![
-        (nalgebra::Vector3::new(10.0, 10.0, 2.0), 150.0),
-        (nalgebra::Vector3::new(8.0, 10.0, 2.0), 150.0),
-        (nalgebra::Vector3::new(8.0, 10.0, 4.0), 150.0),
-        (nalgebra::Vector3::new(10.0, 10.0, 4.0), 150.0),
-        (nalgebra::Vector3::new(-4.0, 0.0, -5.0), 250.0),
-        (nalgebra::Vector3::new(-5.0, 5.0, -2.0), 25.0),
-    ];
-
-    for (pos, intensity) in light_pos_intensities.into_iter() {
-        world
-            .create_entity()
-            .with(components::Light {
-                intensity,
-                color: [1.0, 1.0, 1.0],
-            })
-            .with(components::Transform(
-                nalgebra::Similarity3::identity() * nalgebra::Translation3::from(pos),
-            ))
-            .build();
-    }
 
     // Add specs resources
     world.add_resource(pbr_aux);
