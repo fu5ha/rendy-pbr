@@ -6,7 +6,8 @@ layout(early_fragment_tests) in;
 layout(location = 0) in vec4 f_world_pos;
 layout(location = 1) in vec3 f_norm;
 layout(location = 2) in vec3 f_tang;
-layout(location = 3) in vec2 f_uv;
+layout(location = 3) flat in float f_tbn_handedness;
+layout(location = 4) in vec2 f_uv;
 
 layout(std140) struct Light {
     vec3 pos;
@@ -76,7 +77,7 @@ void main() {
 
     vec3 N = normalize(f_norm);
     vec3 T = normalize(f_tang - N * dot(N, f_tang));
-    vec3 B = normalize(cross(N, T));
+    vec3 B = normalize(cross(N, T)) * f_tbn_handedness;
     mat3 TBN = mat3(T, B, N);
 
     N = normalize(TBN * normal);

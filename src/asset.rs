@@ -141,8 +141,7 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                 .ok_or(format_err!("Primitive does not have normals"))?;
             let tangents = reader
                 .read_tangents()
-                .ok_or(format_err!("Primitive does not have tangents"))?
-                .map(|t| [t[0], t[1], t[2]]);
+                .ok_or(format_err!("Primitive does not have tangents"))?;
             let uvs = reader
                 .read_tex_coords(0)
                 .ok_or(format_err!("Primitive does not have tex coords"))?

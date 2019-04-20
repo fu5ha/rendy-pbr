@@ -45,4 +45,4 @@ optional = true
 # path = "../rendy/rendy"
 features = ["texture-image"]
 git = "https://github.com/termhn/rendy"
-rev = "f84ac11f7bbc632557254b657c7249edb4fe98e2"
+rev = "6c2180a14c78850e36b683407d44df56fc6b0bff"
