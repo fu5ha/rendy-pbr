@@ -171,6 +171,22 @@ where
                     stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
                     immutable_samplers: false,
                 },
+                // env cube map
+                hal::pso::DescriptorSetLayoutBinding {
+                    binding: 2,
+                    ty: hal::pso::DescriptorType::SampledImage,
+                    count: 1,
+                    stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                    immutable_samplers: false,
+                },
+                // irradiance cube map
+                hal::pso::DescriptorSetLayoutBinding {
+                    binding: 3,
+                    ty: hal::pso::DescriptorType::SampledImage,
+                    count: 1,
+                    stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                    immutable_samplers: false,
+                },
             ],
         };
         // SampledImage for each texture map, can reuse same sampler
@@ -252,8 +268,10 @@ where
         let aux = world.read_resource::<Aux>();
         let frames = aux.frames;
         let material_storage = world.read_resource::<asset::MaterialStorage<B>>();
+        let env_storage = world.read_resource::<super::EnvironmentStorage<B>>();
 
         let num_mats = material_storage.0.len();
+        let num_cubemaps = 2;
         let mut descriptor_pool = unsafe {
             factory.create_descriptor_pool(
                 frames + num_mats,
@@ -268,7 +286,7 @@ where
                     },
                     hal::pso::DescriptorRangeDesc {
                         ty: hal::pso::DescriptorType::SampledImage,
-                        count: num_mats * 4,
+                        count: (num_mats * 4) + (num_cubemaps * frames),
                     },
                 ],
             )?
@@ -316,6 +334,24 @@ where
                         binding: 1,
                         array_offset: 0,
                         descriptors: Some(hal::pso::Descriptor::Sampler(texture_sampler.raw())),
+                    },
+                    hal::pso::DescriptorSetWrite {
+                        set: &set,
+                        binding: 2,
+                        array_offset: 0,
+                        descriptors: Some(hal::pso::Descriptor::Image(
+                            env_storage.spec_cube.as_ref().unwrap().view().raw(),
+                            hal::image::Layout::ShaderReadOnlyOptimal,
+                        )),
+                    },
+                    hal::pso::DescriptorSetWrite {
+                        set: &set,
+                        binding: 3,
+                        array_offset: 0,
+                        descriptors: Some(hal::pso::Descriptor::Image(
+                            env_storage.irradiance_cube.as_ref().unwrap().view().raw(),
+                            hal::image::Layout::ShaderReadOnlyOptimal,
+                        )),
                     },
                 ]);
                 frame_sets.push(set);

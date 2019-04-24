@@ -1,6 +1,8 @@
 use crate::components;
 use derivative::Derivative;
+use rendy::hal;
 
+pub mod environment_map;
 pub mod mesh;
 pub mod tonemap;
 
@@ -37,9 +39,19 @@ pub struct LightData {
     pub _pad: f32,
 }
 
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
+pub struct EnvironmentStorage<B: hal::Backend> {
+    pub env_cube: Option<rendy::texture::Texture<B>>,
+    pub irradiance_cube: Option<rendy::texture::Texture<B>>,
+    pub spec_cube: Option<rendy::texture::Texture<B>>,
+}
+
 #[derive(Default)]
 pub struct Aux {
     pub frames: usize,
     pub align: u64,
     pub tonemapper_args: tonemap::TonemapperArgs,
+    pub cube_display: environment_map::CubeDisplay,
+    pub cube_roughness: f32,
 }

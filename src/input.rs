@@ -22,6 +22,7 @@ pub const TRANSLATE_SENSITIVITY: f32 = 0.005;
 pub const ZOOM_MOUSE_SENSITIVITY: f32 = 0.0125;
 pub const ZOOM_SCROLL_SENSITIVITY: f32 = 0.25;
 pub const EXPOSURE_ADJUST_SENSITIVITY: f32 = 0.1;
+pub const CUBE_ROUGHNESS_SENSITIVITY: f32 = 0.1;
 
 #[derive(Derivative, Debug, Clone, Copy)]
 #[derivative(Default)]

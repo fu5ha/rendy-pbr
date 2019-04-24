@@ -23,18 +23,19 @@ use crate::node::env_preprocess::Aux;
 pub struct UniformArgs {
     proj: nalgebra::Matrix4<f32>,
     views: [nalgebra::Matrix4<f32>; 6],
+    roughness: f32,
 }
 
 lazy_static::lazy_static! {
     static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/equirectangular_to_cube_faces.vert"),
+        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/env_to_specular.vert"),
         ShaderKind::Vertex,
         SourceLanguage::GLSL,
         "main",
     );
 
     static ref FRAGMENT: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/equirectangular_to_cube_faces.frag"),
+        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/env_to_specular.frag"),
         ShaderKind::Fragment,
         SourceLanguage::GLSL,
         "main",
@@ -250,7 +251,7 @@ where
                     binding: 1,
                     array_offset: 0,
                     descriptors: Some(hal::pso::Descriptor::Sampler(
-                        aux.equirectangular_texture.sampler().raw(),
+                        aux.environment_cubemap.as_ref().unwrap().sampler().raw(),
                     )),
                 },
                 hal::pso::DescriptorSetWrite {
@@ -258,7 +259,7 @@ where
                     binding: 2,
                     array_offset: 0,
                     descriptors: Some(hal::pso::Descriptor::Image(
-                        aux.equirectangular_texture.view().raw(),
+                        aux.environment_cubemap.as_ref().unwrap().view().raw(),
                         hal::image::Layout::ShaderReadOnlyOptimal,
                     )),
                 },
@@ -315,6 +316,11 @@ where
                             &nalgebra::Vector3::y(),
                         ),
                     ],
+                    roughness: aux
+                        .mip_level
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        as f32
+                        / (crate::SPEC_CUBEMAP_MIP_LEVELS - 1) as f32,
                 }],
             )?
         };

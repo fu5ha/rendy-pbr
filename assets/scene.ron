@@ -62,69 +62,69 @@ SceneConfig(
             camera: Some(CameraData(
                 yaw: 0.0,
                 pitch: 0.0,
-                distance: 4.0,
+                distance: 2.0,
                 focus_point: (0.0, 0.0, 0.0),
-                // PI / 6
-                fov: 0.523598333,
+                // PI / 4
+                fov: 0.7853981625,
                 znear: 0.1,
                 zfar: 200.0,
                 active: true,
             )),
         ),
         // Lights
-        SceneEntity(
-            transform: Manual((
-                translation: (10.0, 10.0, 2.0),
-            )),
-            light: Some((
-                intensity: 150.0,
-                color: (1.0, 0.96, 0.9),
-            )),
-        ),
-        SceneEntity(
-            transform: Manual((
-                translation: (8.0, 10.0, 2.0),
-            )),
-            light: Some((
-                intensity: 150.0,
-                color: (1.0, 0.96, 0.9),
-            )),
-        ),
-        SceneEntity(
-            transform: Manual((
-                translation: (8.0, 10.0, 4.0),
-            )),
-            light: Some((
-                intensity: 150.0,
-                color: (1.0, 0.96, 0.9),
-            )),
-        ),
-        SceneEntity(
-            transform: Manual((
-                translation: (10.0, 10.0, 4.0),
-            )),
-            light: Some((
-                intensity: 150.0,
-                color: (1.0, 0.96, 0.9),
-            )),
-        ),
-        SceneEntity(
-            transform: Manual((
-                translation: (-4.0, 0.0, -5.0),
-            )),
-            light: Some((
-                intensity: 250.0,
-                color: (1.0, 0.96, 0.9),
-            )),
-        ),
-        SceneEntity(
-            transform: Manual((
-                translation: (-5.0, 5.0, -2.0),
-            )),
-            light: Some((
-                intensity: 25.0,
-                color: (1.0, 0.96, 0.9),
-            )),
-        ),
+        // SceneEntity(
+        //     transform: Manual((
+        //         translation: (10.0, 10.0, 2.0),
+        //     )),
+        //     light: Some((
+        //         intensity: 250.0,
+        //         color: (1.0, 0.96, 0.9),
+        //     )),
+        // ),
+        // SceneEntity(
+        //     transform: Manual((
+        //         translation: (8.0, 10.0, 2.0),
+        //     )),
+        //     light: Some((
+        //         intensity: 250.0,
+        //         color: (1.0, 0.96, 0.9),
+        //     )),
+        // ),
+        // SceneEntity(
+        //     transform: Manual((
+        //         translation: (8.0, 10.0, 4.0),
+        //     )),
+        //     light: Some((
+        //         intensity: 250.0,
+        //         color: (1.0, 0.96, 0.9),
+        //     )),
+        // ),
+        // SceneEntity(
+        //     transform: Manual((
+        //         translation: (10.0, 10.0, 4.0),
+        //     )),
+        //     light: Some((
+        //         intensity: 250.0,
+        //         color: (1.0, 0.96, 0.9),
+        //     )),
+        // ),
+        // SceneEntity(
+        //     transform: Manual((
+        //         translation: (-4.0, 0.0, -5.0),
+        //     )),
+        //     light: Some((
+        //         intensity: 450.0,
+        //         color: (1.0, 0.96, 0.9),
+        //     )),
+        // ),
+        // SceneEntity(
+        //     transform: Manual((
+        //         translation: (-5.0, 5.0, -2.0),
+        //     )),
+        //     light: Some((
+        //         intensity: 100.0,
+        //         color: (1.0, 0.96, 0.9),
+        //     )),
+        // ),
     ]
 )

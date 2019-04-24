@@ -22,19 +22,19 @@ use crate::node::env_preprocess::Aux;
 #[repr(C)]
 pub struct UniformArgs {
     proj: nalgebra::Matrix4<f32>,
-    views: [nalgebra::Matrix4<f32>; 6],
+    view: nalgebra::Matrix4<f32>,
 }
 
 lazy_static::lazy_static! {
     static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/equirectangular_to_cube_faces.vert"),
+        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/debug.vert"),
         ShaderKind::Vertex,
         SourceLanguage::GLSL,
         "main",
     );
 
     static ref FRAGMENT: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/equirectangular_to_cube_faces.frag"),
+        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/debug.frag"),
         ShaderKind::Fragment,
         SourceLanguage::GLSL,
         "main",
@@ -105,7 +105,7 @@ where
     }
 
     fn colors(&self) -> Vec<hal::pso::ColorBlendDesc> {
-        vec![hal::pso::ColorBlendDesc(hal::pso::ColorMask::ALL, hal::pso::BlendState::ALPHA,); 6]
+        vec![hal::pso::ColorBlendDesc(hal::pso::ColorMask::ALL, hal::pso::BlendState::Off,); 1]
     }
 
     fn depth_stencil(&self) -> Option<hal::pso::DepthStencilDesc> {
@@ -250,7 +250,7 @@ where
                     binding: 1,
                     array_offset: 0,
                     descriptors: Some(hal::pso::Descriptor::Sampler(
-                        aux.equirectangular_texture.sampler().raw(),
+                        aux.spec_cubemap.as_ref().unwrap().sampler().raw(),
                     )),
                 },
                 hal::pso::DescriptorSetWrite {
@@ -258,7 +258,7 @@ where
                     binding: 2,
                     array_offset: 0,
                     descriptors: Some(hal::pso::Descriptor::Image(
-                        aux.equirectangular_texture.view().raw(),
+                        aux.spec_cubemap.as_ref().unwrap().view().raw(),
                         hal::image::Layout::ShaderReadOnlyOptimal,
                     )),
                 },
@@ -283,38 +283,11 @@ where
                         proj[(1, 1)] *= -1.0;
                         proj
                     },
-                    views: [
-                        nalgebra::Matrix4::look_at_rh(
-                            &origin,
-                            &nalgebra::Point3::new(1.0, 0.0, 0.0),
-                            &nalgebra::Vector3::y(),
-                        ),
-                        nalgebra::Matrix4::look_at_rh(
-                            &origin,
-                            &nalgebra::Point3::new(-1.0, 0.0, 0.0),
-                            &nalgebra::Vector3::y(),
-                        ),
-                        nalgebra::Matrix4::look_at_rh(
-                            &origin,
-                            &nalgebra::Point3::new(0.0, 1.0, 0.0),
-                            &nalgebra::Vector3::z(),
-                        ),
-                        nalgebra::Matrix4::look_at_rh(
-                            &origin,
-                            &nalgebra::Point3::new(0.0, -1.0, 0.0),
-                            &-nalgebra::Vector3::z(),
-                        ),
-                        nalgebra::Matrix4::look_at_rh(
-                            &origin,
-                            &nalgebra::Point3::new(0.0, 0.0, 1.0),
-                            &nalgebra::Vector3::y(),
-                        ),
-                        nalgebra::Matrix4::look_at_rh(
-                            &origin,
-                            &nalgebra::Point3::new(0.0, 0.0, -1.0),
-                            &nalgebra::Vector3::y(),
-                        ),
-                    ],
+                    view: nalgebra::Matrix4::look_at_rh(
+                        &origin,
+                        &nalgebra::Point3::new(0.0, 0.0, 1.0),
+                        &-nalgebra::Vector3::y(),
+                    ),
                 }],
             )?
         };
@@ -354,7 +327,7 @@ where
     ) {
         assert!(self.cube.bind(&[Position::VERTEX], &mut encoder).is_ok());
         encoder.bind_graphics_descriptor_sets(layout, 0, Some(&self.set), std::iter::empty());
-        encoder.draw(0..36, 0..1);
+        encoder.draw(0..36, 0..6);
     }
 
     fn dispose(mut self, factory: &mut Factory<B>, _aux: &Aux<B>) {

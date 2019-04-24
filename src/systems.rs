@@ -145,6 +145,45 @@ impl<'a> System<'a> for PbrAuxInputSystem {
                                         ElementState::Pressed,
                                         ModifiersState { .. },
                                     ) => aux.tonemapper_args.curve = 2,
+                                    // Environment Cube map display
+                                    (
+                                        VirtualKeyCode::M,
+                                        ElementState::Pressed,
+                                        ModifiersState { .. },
+                                    ) => {
+                                        aux.cube_display =
+                                            node::pbr::environment_map::CubeDisplay::Environment
+                                    }
+                                    (
+                                        VirtualKeyCode::I,
+                                        ElementState::Pressed,
+                                        ModifiersState { .. },
+                                    ) => {
+                                        aux.cube_display =
+                                            node::pbr::environment_map::CubeDisplay::Irradiance
+                                    }
+                                    (
+                                        VirtualKeyCode::S,
+                                        ElementState::Pressed,
+                                        ModifiersState { shift: true, .. },
+                                    ) => {
+                                        aux.cube_display =
+                                            node::pbr::environment_map::CubeDisplay::Specular;
+                                        aux.cube_roughness -= input::CUBE_ROUGHNESS_SENSITIVITY;
+                                        aux.cube_roughness = aux.cube_roughness.max(0.0);
+                                    }
+                                    (
+                                        VirtualKeyCode::S,
+                                        ElementState::Pressed,
+                                        ModifiersState { shift: false, .. },
+                                    ) => {
+                                        aux.cube_display =
+                                            node::pbr::environment_map::CubeDisplay::Specular;
+                                        aux.cube_roughness += input::CUBE_ROUGHNESS_SENSITIVITY;
+                                        aux.cube_roughness = aux
+                                            .cube_roughness
+                                            .min(crate::SPEC_CUBEMAP_MIP_LEVELS as f32 - 1.0);
+                                    }
                                     _ => (),
                                 }
                             }
@@ -230,7 +269,7 @@ impl<'a> System<'a> for CameraInputSystem {
                                 ) => {
                                     let amount = -delta.0 as f32 * ZOOM_MOUSE_SENSITIVITY;
                                     camera.dist += amount;
-                                    camera.dist = camera.dist.max(0.0);
+                                    camera.dist = camera.dist.max(0.1);
                                 }
                                 _ => (),
                             }
@@ -245,7 +284,7 @@ impl<'a> System<'a> for CameraInputSystem {
                                 }
                             };
                             camera.dist += amount;
-                            camera.dist = camera.dist.max(0.0);
+                            camera.dist = camera.dist.max(0.01);
                         }
                         _ => (),
                     },
