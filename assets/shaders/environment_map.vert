@@ -5,14 +5,12 @@ layout(location = 0) in vec3 a_pos;
 
 layout(std140, set = 0, binding = 0) uniform UniformArgs {
     mat4 proj;
-    mat4 view[6];
+    mat4 view;
 };
 
 layout(location = 0) out vec3 f_pos;
-layout(location = 1) flat out int face_index;
 
 void main() {
     f_pos = a_pos;
-    face_index = gl_VertexIndex / 6;
-    gl_Position = proj * view[face_index] * vec4(f_pos, 1.0);
+    gl_Position = proj * view * vec4(vec3(100.0) * f_pos, 1.0);
 }

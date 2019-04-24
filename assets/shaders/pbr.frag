@@ -24,6 +24,8 @@ layout(std140, set = 0, binding = 0) uniform Args {
 };
 
 layout(set = 0, binding = 1) uniform sampler tex_sampler;
+layout(set = 0, binding = 2) uniform textureCube spec_cube_map;
+layout(set = 0, binding = 3) uniform textureCube irradiance_cube_map;
 
 layout(set = 1, binding = 0) uniform texture2D albedo_map;
 layout(set = 1, binding = 1) uniform texture2D normal_map;
@@ -31,6 +33,8 @@ layout(set = 1, binding = 2) uniform texture2D metallic_roughness_map;
 layout(set = 1, binding = 3) uniform texture2D ao_map;
 
 layout(location = 0) out vec4 color;
+
+const float MAX_SPEC_LOD = 4.0;
 
 vec3 f_schlick(const vec3 f0, const float vh) {
 	return f0 + (1.0 - f0) * exp2((-5.55473 * vh - 6.98316) * vh);
@@ -81,11 +85,19 @@ void main() {
     mat3 TBN = mat3(T, B, N);
 
     N = normalize(TBN * normal);
+    vec3 R = reflect(-V, N);
+
+    vec3 ambient_irradiance = texture(samplerCube(irradiance_cube_map, tex_sampler), N).rgb;
+    vec3 ambient_spec = textureLod(samplerCube(spec_cube_map, tex_sampler), R, roughness * MAX_SPEC_LOD).rgb;
+
+    // color = vec4(ambient_irradiance, 1.0);
+    // return;
 
     vec3 f0 = mix(vec3(0.04), albedo, metallic);
 
     float NdotV = abs(dot(N, V)) + 0.00001;
 
+    float a = roughness * roughness;
     vec3 acc = vec3(0.0);
     for (int i = 0; i < lights_count; ++i) {
         vec3 L = lights[i].pos - f_world_pos.xyz;
@@ -97,7 +109,6 @@ void main() {
         float NdotL = saturate(dot(N, L));
         float NdotH = saturate(dot(N, H));
         float VdotH = saturate(dot(H, V));
-        float a = roughness * roughness;
         vec3 fresnel = f_schlick(f0, VdotH);
         vec3 k_D = vec3(1.0) - fresnel;
         k_D *= 1.0 - metallic;
@@ -109,6 +120,14 @@ void main() {
 
         acc += (diffuse + specular) * NdotL * l_contrib;
     }
-    vec3 final = vec3(0.1, 0.3, 0.4) * 0.02 * ao + acc;
+
+    vec3 ambient_spec_fres = f_schlick(f0, NdotV);
+
+    vec3 ambient_diffuse_fac = vec3(1.0) - ambient_spec_fres;
+    ambient_diffuse_fac *= 1.0 - metallic;
+
+    vec3 ambient = (ambient_irradiance * albedo * ambient_diffuse_fac) + (ambient_spec * ambient_spec_fres);
+
+    vec3 final = ambient * ao + acc;
     color = vec4(final, 1.0);
 }

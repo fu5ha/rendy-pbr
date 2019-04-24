@@ -6,8 +6,8 @@ use rendy::{
     factory::{Factory, ImageState},
     frame::Frames,
     graph::{
-        gfx_acquire_barriers, gfx_release_barriers, BufferAccess, BufferId, DynNode, ImageAccess,
-        ImageId, NodeBuffer, NodeBuilder, NodeId, NodeImage,
+        gfx_acquire_barriers, gfx_release_barriers, BufferAccess, BufferId, DynNode, GraphContext,
+        ImageAccess, ImageId, NodeBuffer, NodeBuilder, NodeId, NodeImage,
     },
     texture::Texture,
 };
@@ -23,10 +23,16 @@ pub struct FacesToCubemap<B: hal::Backend> {
 }
 
 impl<B: hal::Backend> FacesToCubemap<B> {
-    pub fn builder(faces: Vec<ImageId>) -> FacesToCubemapBuilder {
-        assert_eq!(faces.len(), 6);
+    pub fn builder(
+        faces: Vec<ImageId>,
+        cubemap_name: &str,
+        mip_levels: u8,
+    ) -> FacesToCubemapBuilder {
+        assert_eq!(faces.len(), 6 * mip_levels as usize);
         FacesToCubemapBuilder {
             faces,
+            mip_levels,
+            cubemap_name: String::from(cubemap_name),
             dependencies: vec![],
         }
     }
@@ -35,6 +41,8 @@ impl<B: hal::Backend> FacesToCubemap<B> {
 #[derive(Debug)]
 pub struct FacesToCubemapBuilder {
     faces: Vec<ImageId>,
+    mip_levels: u8,
+    cubemap_name: String,
     dependencies: Vec<NodeId>,
 }
 
@@ -55,8 +63,8 @@ impl FacesToCubemapBuilder {
 }
 
 pub trait FacesToCubemapResource<B: hal::Backend> {
-    fn get_cubemap(&self) -> &Texture<B>;
-    fn cubemap_end_state(&self) -> ImageState;
+    fn get_cubemap(&self, name: &str) -> &Texture<B>;
+    fn cubemap_end_state(&self, name: &str) -> ImageState;
 }
 
 impl<B, FR> NodeBuilder<B, FR> for FacesToCubemapBuilder
@@ -98,36 +106,39 @@ where
 
     fn build<'a>(
         self: Box<Self>,
+        ctx: &GraphContext<B>,
         factory: &mut Factory<B>,
         family: &mut Family<B>,
         _queue: usize,
-        aux: &mut FR,
-        buffers: Vec<NodeBuffer<'a, B>>,
-        images: Vec<NodeImage<'a, B>>,
+        aux: &FR,
+        buffers: Vec<NodeBuffer>,
+        images: Vec<NodeImage>,
     ) -> Result<Box<dyn DynNode<B, FR>>, failure::Error> {
         assert_eq!(buffers.len(), 0);
-        assert_eq!(images.len(), 6);
+        assert_eq!(images.len(), 6 * self.mip_levels as usize);
 
         let mut pool = factory.create_command_pool(family)?;
 
         let buf_initial = pool.allocate_buffers(1).pop().unwrap();
         let mut buf_recording = buf_initial.begin(MultiShot(SimultaneousUse), ());
         let mut encoder = buf_recording.encoder();
-        let target_cubemap = aux.get_cubemap();
+        let target_cubemap = aux.get_cubemap(&self.cubemap_name);
 
         {
-            let (stages, barriers) = gfx_acquire_barriers(None, images.iter());
+            let (stages, barriers) = gfx_acquire_barriers(ctx, None, images.iter());
             log::info!("Acquire {:?} : {:#?}", stages, barriers);
             if !barriers.is_empty() {
                 encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
             }
         }
         for (i, face) in images.iter().enumerate() {
-            let i = i as u16;
+            let dst_mip_level = i / 6;
+            let i = i as u16 % 6;
+            let image = ctx.get_image(face.id).unwrap();
             encoder.copy_image(
-                face.image.raw(),
+                image.raw(),
                 face.layout,
-                target_cubemap.image.raw(),
+                target_cubemap.image().raw(),
                 hal::image::Layout::TransferDstOptimal,
                 Some(hal::command::ImageCopy {
                     src_subresource: hal::image::SubresourceLayers {
@@ -138,21 +149,21 @@ where
                     src_offset: hal::image::Offset::ZERO,
                     dst_subresource: hal::image::SubresourceLayers {
                         aspects: hal::format::Aspects::COLOR,
-                        level: 0,
+                        level: dst_mip_level as u8,
                         layers: i..i + 1,
                     },
                     dst_offset: hal::image::Offset::ZERO,
                     extent: hal::image::Extent {
-                        width: face.image.kind().extent().width,
-                        height: face.image.kind().extent().height,
+                        width: image.kind().extent().width,
+                        height: image.kind().extent().height,
                         depth: 1,
                     },
                 }),
             );
         }
         {
-            let (mut stages, mut barriers) = gfx_release_barriers(None, images.iter());
-            let end_state = aux.cubemap_end_state();
+            let (mut stages, mut barriers) = gfx_release_barriers(ctx, None, images.iter());
+            let end_state = aux.cubemap_end_state(&self.cubemap_name);
             stages.start |= hal::pso::PipelineStage::TRANSFER;
             stages.end |= end_state.stage;
             barriers.push(hal::memory::Barrier::Image {
@@ -161,7 +172,7 @@ where
                     hal::image::Layout::TransferDstOptimal,
                 )..(end_state.access, end_state.layout),
                 families: None,
-                target: target_cubemap.image.raw(),
+                target: target_cubemap.image().raw(),
                 range: hal::image::SubresourceRange {
                     aspects: hal::format::Aspects::COLOR,
                     levels: 0..1,
@@ -190,6 +201,7 @@ where
 {
     unsafe fn run<'a>(
         &mut self,
+        _ctx: &GraphContext<B>,
         _factory: &Factory<B>,
         queue: &mut Queue<B>,
         _aux: &FR,
@@ -209,7 +221,7 @@ where
         );
     }
 
-    unsafe fn dispose(mut self: Box<Self>, factory: &mut Factory<B>, _aux: &mut FR) {
+    unsafe fn dispose(mut self: Box<Self>, factory: &mut Factory<B>, _aux: &FR) {
         drop(self.submit);
         self.pool.free_buffers(Some(self.buffer.mark_complete()));
         factory.destroy_command_pool(self.pool);
