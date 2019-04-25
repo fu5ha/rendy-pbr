@@ -13,11 +13,11 @@ layout(std140, set = 0, binding = 0) uniform UniformArgs {
 layout(set = 0, binding = 1) uniform sampler env_sampler;
 layout(set = 0, binding = 2) uniform textureCube env_texture;
 
-const float PI = 3.14159265359;
-
-const uint SAMPLE_COUNT = 2048;
-
 layout(location = 0) out vec4 color[6];
+
+const uint SAMPLE_COUNT = 8192;
+
+const float PI = 3.14159265359;
 
 float RadicalInverse_VdC(uint bits) 
 {

@@ -29,6 +29,7 @@ pub const ENV_CUBEMAP_RES: u32 = 1024;
 pub const IRRADIANCE_CUBEMAP_RES: u32 = 64;
 pub const SPEC_CUBEMAP_RES: u32 = 256;
 pub const SPEC_CUBEMAP_MIP_LEVELS: u8 = 5;
+pub const SPEC_BRDF_MAP_RES: u32 = 512;
 pub const MAX_LIGHTS: usize = 32;
 pub const FRAMES_IN_FLIGHT: u32 = 3;
 
@@ -81,6 +82,8 @@ fn run() -> Result<(), failure::Error> {
     world.register::<components::Light>();
 
     let config: Config = Default::default();
+
+    let scene_config = scene::SceneConfig::from_path("assets/scene.ron")?;
 
     let (mut factory, mut families): (Factory<Backend>, _) = rendy::factory::init(config)?;
 
@@ -231,6 +234,28 @@ fn run() -> Result<(), failure::Error> {
 
     let _spec_to_cube_pass = env_preprocess_graph_builder.add_node(builder);
 
+    let spec_brdf_map = env_preprocess_graph_builder.create_image(
+        hal::image::Kind::D2(SPEC_BRDF_MAP_RES, SPEC_BRDF_MAP_RES, 1, 1),
+        1,
+        hal::format::Format::Rg32Float,
+        Some(hal::command::ClearValue::Color([0.0, 0.0].into())),
+    );
+
+    let brdf_integration_pass = env_preprocess_graph_builder.add_node(
+        node::env_preprocess::integrate_spec_brdf::Pipeline::builder()
+            .into_subpass()
+            .with_color(spec_brdf_map)
+            .into_pass(),
+    );
+
+    let _brdf_to_texture = env_preprocess_graph_builder.add_node(
+        node::env_preprocess::copy_to_texture::CopyToTexture::<Backend>::builder(
+            spec_brdf_map,
+            "spec_brdf",
+        )
+        .with_dependency(brdf_integration_pass),
+    );
+
     // let dbg_color = env_preprocess_graph_builder.create_image(
     //     surface.kind(),
     //     1,
@@ -247,17 +272,14 @@ fn run() -> Result<(), failure::Error> {
     //         .into_pass(),
     // );
 
-    // env_preprocess_graph_builder
-    //     .add_node(PresentNode::builder(&factory, surface, dbg_color).with_dependency(dbg_pass));
+    // env_preprocess_graph_builder.add_node(
+    //     PresentNode::builder(&factory, surface, spec_brdf_map).with_dependency(_brdf_to_texture),
+    // );
 
-    let equirect_file = std::fs::File::open(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        // "/assets/environment/spruit_sunrise_4k.hdr"
-        // "/assets/environment/abandoned_hall_01_4k.hdr"
-        // "/assets/environment/WinterForest_Ref.hdr"
-        // "/assets/environment/Frozen_Waterfall_Ref.hdr"
-        "/assets/environment/Factory_Catwalk_2k.hdr"
-    ))?;
+    let equirect_file = std::fs::File::open(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(scene_config.environment_map.clone()),
+    )?;
 
     let equirect_tex = rendy::texture::image::load_from_image(
         std::io::BufReader::new(equirect_file),
@@ -356,12 +378,37 @@ fn run() -> Result<(), failure::Error> {
             &mut factory,
         )?;
 
+    let spec_brdf_tex = rendy::texture::TextureBuilder::new()
+        .with_kind(rendy::resource::Kind::D2(
+            SPEC_BRDF_MAP_RES,
+            SPEC_BRDF_MAP_RES,
+            1,
+            1,
+        ))
+        .with_view_kind(rendy::resource::ViewKind::D2)
+        .with_data_width(SPEC_BRDF_MAP_RES)
+        .with_data_height(SPEC_BRDF_MAP_RES)
+        .with_data(vec![
+            rendy::texture::pixel::Rg32Float { repr: [0.0, 0.0] };
+            (SPEC_BRDF_MAP_RES * SPEC_BRDF_MAP_RES) as usize
+        ])
+        .build(
+            ImageState {
+                queue,
+                stage: hal::pso::PipelineStage::TRANSFER,
+                access: hal::image::Access::TRANSFER_WRITE,
+                layout: hal::image::Layout::TransferDstOptimal,
+            },
+            &mut factory,
+        )?;
+
     let mut env_preprocess_aux = node::env_preprocess::Aux {
         align,
         equirectangular_texture: equirect_tex,
         environment_cubemap: Some(env_cubemap_tex),
         irradiance_cubemap: Some(irradiance_cubemap_tex),
         spec_cubemap: Some(spec_cubemap_tex),
+        spec_brdf_map: Some(spec_brdf_tex),
         queue,
         mip_level: std::sync::atomic::AtomicUsize::new(0),
     };
@@ -426,7 +473,6 @@ fn run() -> Result<(), failure::Error> {
     specs::System::setup(&mut transform_system, &mut world.res);
 
     // Load scene from config file
-    let scene_config = scene::SceneConfig::from_path("assets/scene.ron")?;
     let (material_storage, primitive_storage, mesh_storage, _scene_entities) =
         scene_config.load(aspect, &mut factory, queue, &mut world)?;
 
@@ -437,7 +483,7 @@ fn run() -> Result<(), failure::Error> {
         frames: FRAMES_IN_FLIGHT as _,
         align,
         tonemapper_args: node::pbr::tonemap::TonemapperArgs {
-            exposure: 0.2,
+            exposure: 1.7,
             curve: 0,
             comparison_factor: 0.5,
         },
@@ -456,6 +502,7 @@ fn run() -> Result<(), failure::Error> {
         env_cube: env_preprocess_aux.environment_cubemap.take(),
         irradiance_cube: env_preprocess_aux.irradiance_cubemap.take(),
         spec_cube: env_preprocess_aux.spec_cubemap.take(),
+        spec_brdf_map: env_preprocess_aux.spec_brdf_map.take(),
     });
     world.add_resource(systems::HelmetArraySize { x: 0, y: 0, z: 0 });
     world.add_resource(systems::HelmetArrayEntities(Vec::new()));

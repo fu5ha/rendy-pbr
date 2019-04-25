@@ -45,6 +45,7 @@ pub struct EnvironmentStorage<B: hal::Backend> {
     pub env_cube: Option<rendy::texture::Texture<B>>,
     pub irradiance_cube: Option<rendy::texture::Texture<B>>,
     pub spec_cube: Option<rendy::texture::Texture<B>>,
+    pub spec_brdf_map: Option<rendy::texture::Texture<B>>,
 }
 
 #[derive(Default)]
