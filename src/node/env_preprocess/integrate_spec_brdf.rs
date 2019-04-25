@@ -3,7 +3,7 @@ use rendy::{
     factory::Factory,
     graph::{render::*, GraphContext, NodeBuffer, NodeImage},
     resource::{DescriptorSetLayout, Handle},
-    shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
+    shader::{PathBufShaderInfo, Shader, ShaderKind, SourceLanguage},
 };
 
 use rendy::hal;
@@ -11,15 +11,15 @@ use rendy::hal;
 use crate::node::env_preprocess::Aux;
 
 lazy_static::lazy_static! {
-    static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/fullscreen_triangle.vert"),
+    static ref VERTEX: PathBufShaderInfo = PathBufShaderInfo::new(
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/fullscreen_triangle.vert"),
         ShaderKind::Vertex,
         SourceLanguage::GLSL,
         "main",
     );
 
-    static ref FRAGMENT: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/integrate_spec_brdf.frag"),
+    static ref FRAGMENT: PathBufShaderInfo = PathBufShaderInfo::new(
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/integrate_spec_brdf.frag"),
         ShaderKind::Fragment,
         SourceLanguage::GLSL,
         "main",

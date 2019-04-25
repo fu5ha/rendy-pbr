@@ -68,6 +68,27 @@ fn main() {
     }
 }
 
+// Returns the cargo manifest directory when running the executable with cargo
+// or the directory in which the executable resides otherwise,
+// traversing symlinks if necessary.
+pub fn application_root_dir() -> String {
+    match std::env::var("CARGO_MANIFEST_DIR") {
+        Ok(_) => String::from(env!("CARGO_MANIFEST_DIR")),
+        Err(_) => {
+            let mut path = std::env::current_exe().expect("Failed to find executable path.");
+            while let Ok(target) = std::fs::read_link(path.clone()) {
+                path = target;
+            }
+            String::from(
+                path.parent()
+                    .expect("Failed to get parent directory of the executable.")
+                    .to_str()
+                    .unwrap(),
+            )
+        }
+    }
+}
+
 #[cfg(any(feature = "dx12", feature = "metal", feature = "vulkan"))]
 fn run() -> Result<(), failure::Error> {
     // Initialize specs and register components
@@ -277,8 +298,7 @@ fn run() -> Result<(), failure::Error> {
     // );
 
     let equirect_file = std::fs::File::open(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join(scene_config.environment_map.clone()),
+        &std::path::Path::new(&application_root_dir()).join(scene_config.environment_map.clone()),
     )?;
 
     let equirect_tex = rendy::texture::image::load_from_image(

@@ -13,7 +13,7 @@ use rendy::{
     memory::MemoryUsageValue,
     mesh::{AsVertex, Mesh, Position},
     resource::{Buffer, BufferInfo, DescriptorSetLayout, Escape, Handle},
-    shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
+    shader::{PathBufShaderInfo, Shader, ShaderKind, SourceLanguage},
 };
 
 use rendy::hal;
@@ -41,15 +41,15 @@ pub struct UniformArgs {
 }
 
 lazy_static::lazy_static! {
-    static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/environment_map.vert"),
+    static ref VERTEX: PathBufShaderInfo = PathBufShaderInfo::new(
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/environment_map.vert"),
         ShaderKind::Vertex,
         SourceLanguage::GLSL,
         "main",
     );
 
-    static ref FRAGMENT: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/environment_map.frag"),
+    static ref FRAGMENT: PathBufShaderInfo = PathBufShaderInfo::new(
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/environment_map.frag"),
         ShaderKind::Fragment,
         SourceLanguage::GLSL,
         "main",
