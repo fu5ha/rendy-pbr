@@ -24,6 +24,7 @@ pub type GltfFileIndex = usize;
 /// a list of entities in the scene.
 #[derive(Debug, Deserialize)]
 pub struct SceneConfig {
+    pub environment_map: String,
     pub gltf_sources: Vec<(BasePath, Filename)>,
     pub entities: Vec<SceneEntity>,
 }

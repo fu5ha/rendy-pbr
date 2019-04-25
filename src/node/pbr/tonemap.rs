@@ -18,7 +18,7 @@ use crate::node::pbr::Aux;
 
 lazy_static::lazy_static! {
     static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/tonemap.vert"),
+        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/fullscreen_triangle.vert"),
         ShaderKind::Vertex,
         SourceLanguage::GLSL,
         "main",

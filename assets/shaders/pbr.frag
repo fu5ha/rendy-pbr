@@ -15,7 +15,12 @@ layout(std140) struct Light {
     vec3 color;
 };
 
-layout(std140, set = 0, binding = 0) uniform Args {
+layout(set = 0, binding = 0) uniform sampler tex_sampler;
+layout(set = 0, binding = 1) uniform textureCube spec_cube_map;
+layout(set = 0, binding = 2) uniform textureCube irradiance_cube_map;
+layout(set = 0, binding = 3) uniform texture2D spec_brdf_map;
+
+layout(std140, set = 1, binding = 0) uniform Args {
     layout(offset = 0) mat4 proj;
     layout(offset = 64) mat4 view;
     layout(offset = 128) vec3 camera_pos;
@@ -23,14 +28,10 @@ layout(std140, set = 0, binding = 0) uniform Args {
     layout(offset = 144) Light lights[32];
 };
 
-layout(set = 0, binding = 1) uniform sampler tex_sampler;
-layout(set = 0, binding = 2) uniform textureCube spec_cube_map;
-layout(set = 0, binding = 3) uniform textureCube irradiance_cube_map;
-
-layout(set = 1, binding = 0) uniform texture2D albedo_map;
-layout(set = 1, binding = 1) uniform texture2D normal_map;
-layout(set = 1, binding = 2) uniform texture2D metallic_roughness_map;
-layout(set = 1, binding = 3) uniform texture2D ao_map;
+layout(set = 2, binding = 0) uniform texture2D albedo_map;
+layout(set = 2, binding = 1) uniform texture2D normal_map;
+layout(set = 2, binding = 2) uniform texture2D metallic_roughness_map;
+layout(set = 2, binding = 3) uniform texture2D ao_map;
 
 layout(location = 0) out vec4 color;
 
@@ -87,15 +88,20 @@ void main() {
     N = normalize(TBN * normal);
     vec3 R = reflect(-V, N);
 
-    vec3 ambient_irradiance = texture(samplerCube(irradiance_cube_map, tex_sampler), N).rgb;
-    vec3 ambient_spec = textureLod(samplerCube(spec_cube_map, tex_sampler), R, roughness * MAX_SPEC_LOD).rgb;
-
-    // color = vec4(ambient_irradiance, 1.0);
-    // return;
+    float NdotV = abs(dot(N, V)) + 0.00001;
 
     vec3 f0 = mix(vec3(0.04), albedo, metallic);
 
-    float NdotV = abs(dot(N, V)) + 0.00001;
+    vec3 ambient_irradiance = texture(samplerCube(irradiance_cube_map, tex_sampler), N).rgb;
+    vec3 ambient_spec = textureLod(samplerCube(spec_cube_map, tex_sampler), R, roughness * MAX_SPEC_LOD).rgb;
+    vec2 env_brdf = texture(sampler2D(spec_brdf_map, tex_sampler), vec2(NdotV, roughness)).rg;
+
+    vec3 ambient_spec_fres = f_schlick(f0, NdotV);
+
+    vec3 ambient_diffuse_fac = vec3(1.0) - ambient_spec_fres;
+    ambient_diffuse_fac *= 1.0 - metallic;
+
+    vec3 ambient = (ambient_irradiance * albedo * ambient_diffuse_fac) + (ambient_spec * (ambient_spec_fres * env_brdf.x + env_brdf.y));
 
     float a = roughness * roughness;
     vec3 acc = vec3(0.0);
@@ -121,12 +127,6 @@ void main() {
         acc += (diffuse + specular) * NdotL * l_contrib;
     }
 
-    vec3 ambient_spec_fres = f_schlick(f0, NdotV);
-
-    vec3 ambient_diffuse_fac = vec3(1.0) - ambient_spec_fres;
-    ambient_diffuse_fac *= 1.0 - metallic;
-
-    vec3 ambient = (ambient_irradiance * albedo * ambient_diffuse_fac) + (ambient_spec * ambient_spec_fres);
 
     vec3 final = ambient * ao + acc;
     color = vec4(final, 1.0);
