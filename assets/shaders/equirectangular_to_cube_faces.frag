@@ -16,7 +16,7 @@ vec2 SampleSphericalMap(vec3 v)
     return uv;
 }
 
-layout(location = 0) out vec4 color[6];
+layout(location = 0) out vec4 color;
 
 void main() {
     vec3 pos = f_pos;
@@ -26,8 +26,8 @@ void main() {
     }
     vec2 uv = SampleSphericalMap(normalize(pos));
     vec3 col = texture(sampler2D(equirectangular_texture, equirectangular_sampler), uv).rgb;
-    for (int i = 0; i < 6; i++) {
-        color[i] = vec4(0.0);
-    }
-    color[face_index] = vec4(col, 1.0);
+    // for (int i = 0; i < 6; i++) {
+    //     color[i] = vec4(0.0);
+    // }
+    color = vec4(col, 1.0);
 }

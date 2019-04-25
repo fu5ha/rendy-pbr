@@ -1,6 +1,8 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
+layout(constant_id = 0) const int THETA_SAMPLES = 256;
+
 layout(location = 0) in vec3 f_pos;
 layout(location = 1) flat in int face_index;
 
@@ -9,10 +11,9 @@ layout(set = 0, binding = 2) uniform textureCube env_texture;
 
 const float PI = 3.14159265359;
 
-const int THETA_SAMPLES = 960;
-const int PHI_SAMPLES = 192;
+const int PHI_SAMPLES = THETA_SAMPLES/4;
 
-layout(location = 0) out vec4 color[6];
+layout(location = 0) out vec4 color;
 
 void main() {
     vec3 pos = f_pos;
@@ -51,8 +52,8 @@ void main() {
     
     irradiance = PI * irradiance * (1.0 / float(THETA_SAMPLES * PHI_SAMPLES));
 
-    for (int i = 0; i < 6; i++) {
-        color[i] = vec4(0.0);
-    }
-    color[face_index] = vec4(irradiance, 1.0);
+    // for (int i = 0; i < 6; i++) {
+    //     color[i] = vec4(0.0);
+    // }
+    color = vec4(irradiance, 1.0);
 }

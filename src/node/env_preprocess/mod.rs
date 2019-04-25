@@ -12,6 +12,8 @@ pub mod integrate_spec_brdf;
 
 pub struct Aux<B: hal::Backend> {
     pub align: u64,
+    pub irradiance_theta_samples: u32,
+    pub spec_samples: u32,
     pub equirectangular_texture: Texture<B>,
     pub environment_cubemap: Option<Texture<B>>,
     pub irradiance_cubemap: Option<Texture<B>>,

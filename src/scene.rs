@@ -25,8 +25,17 @@ pub type GltfFileIndex = usize;
 #[derive(Debug, Deserialize)]
 pub struct SceneConfig {
     pub environment_map: String,
+    pub environment_filter_quality: Quality,
     pub gltf_sources: Vec<(BasePath, Filename)>,
     pub entities: Vec<SceneEntity>,
+}
+
+/// Determines the quality of some part of the render
+#[derive(Debug, Deserialize)]
+pub enum Quality {
+    Low,
+    Medium,
+    High
 }
 
 /// The index of an entity in the SceneEntity list of the scene config

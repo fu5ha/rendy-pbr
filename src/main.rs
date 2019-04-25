@@ -25,7 +25,7 @@ mod scene;
 mod systems;
 mod transform;
 
-pub const ENV_CUBEMAP_RES: u32 = 1024;
+pub const ENV_CUBEMAP_RES: u32 = 512;
 pub const IRRADIANCE_CUBEMAP_RES: u32 = 64;
 pub const SPEC_CUBEMAP_RES: u32 = 256;
 pub const SPEC_CUBEMAP_MIP_LEVELS: u8 = 5;
@@ -149,28 +149,38 @@ fn run() -> Result<(), failure::Error> {
         node::env_preprocess::equirectangular_to_cube_faces::Pipeline::<Backend>::builder()
             .into_subpass();
 
-    let env_cube_face_images = hal::image::CUBE_FACES
-        .into_iter()
-        .map(|_| {
-            env_preprocess_graph_builder.create_image(
-                hal::image::Kind::D2(ENV_CUBEMAP_RES, ENV_CUBEMAP_RES, 1, 1),
-                1,
-                hal::format::Format::Rgba32Float,
-                Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
-            )
-        })
-        .collect::<Vec<_>>();
+    // let env_cube_face_images = hal::image::CUBE_FACES
+    //     .into_iter()
+    //     .map(|_| {
+    //         env_preprocess_graph_builder.create_image(
+    //             hal::image::Kind::D2(ENV_CUBEMAP_RES, ENV_CUBEMAP_RES, 1, 1),
+    //             1,
+    //             hal::format::Format::Rgba32Float,
+    //             Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
+    //         )
+    //     })
+    //     .collect::<Vec<_>>();
 
-    for image in env_cube_face_images.iter().cloned() {
-        equirect_to_faces.add_color(image);
-    }
+    let env_cube_faces_img = env_preprocess_graph_builder.create_image(
+        hal::image::Kind::D2(ENV_CUBEMAP_RES, ENV_CUBEMAP_RES, 1, 1),
+        1,
+        hal::format::Format::Rgba32Float,
+        Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
+    );
+
+    // for image in env_cube_face_images.iter().cloned() {
+    //     equirect_to_faces.add_color(image);
+    // }
+
+    equirect_to_faces.add_color(env_cube_faces_img);
 
     let equirect_to_faces_pass =
         env_preprocess_graph_builder.add_node(equirect_to_faces.into_pass());
 
     let faces_to_env_pass = env_preprocess_graph_builder.add_node(
         node::env_preprocess::faces_to_cubemap::FacesToCubemap::<Backend>::builder(
-            env_cube_face_images.clone(),
+            // env_cube_face_images.clone(),
+            vec![env_cube_faces_img],
             "environment",
             1,
         )
@@ -184,28 +194,38 @@ fn run() -> Result<(), failure::Error> {
             .with_dependency(faces_to_env_pass)
             .into_subpass();
 
-    let irradiance_cube_face_images = hal::image::CUBE_FACES
-        .into_iter()
-        .map(|_| {
-            env_preprocess_graph_builder.create_image(
-                hal::image::Kind::D2(IRRADIANCE_CUBEMAP_RES, IRRADIANCE_CUBEMAP_RES, 1, 1),
-                1,
-                hal::format::Format::Rgba32Float,
-                Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
-            )
-        })
-        .collect::<Vec<_>>();
+    let irradiance_cube_faces_img = env_preprocess_graph_builder.create_image(
+        hal::image::Kind::D2(IRRADIANCE_CUBEMAP_RES, IRRADIANCE_CUBEMAP_RES * 6, 1, 1),
+        1,
+        hal::format::Format::Rgba32Float,
+        Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
+    );
 
-    for image in irradiance_cube_face_images.iter().cloned() {
-        env_to_irradiance_faces_subpass.add_color(image);
-    }
+    // let irradiance_cube_face_images = hal::image::CUBE_FACES
+    //     .into_iter()
+    //     .map(|_| {
+    //         env_preprocess_graph_builder.create_image(
+    //             hal::image::Kind::D2(IRRADIANCE_CUBEMAP_RES, IRRADIANCE_CUBEMAP_RES, 1, 1),
+    //             1,
+    //             hal::format::Format::Rgba32Float,
+    //             Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
+    //         )
+    //     })
+    //     .collect::<Vec<_>>();
+
+    env_to_irradiance_faces_subpass.add_color(irradiance_cube_faces_img);
+
+    // for image in irradiance_cube_face_images.iter().cloned() {
+    //     env_to_irradiance_faces_subpass.add_color(image);
+    // }
 
     let env_to_irradiance_faces_pass =
         env_preprocess_graph_builder.add_node(env_to_irradiance_faces_subpass.into_pass());
 
     let _irradiance_to_cube_pass = env_preprocess_graph_builder.add_node(
         node::env_preprocess::faces_to_cubemap::FacesToCubemap::<Backend>::builder(
-            irradiance_cube_face_images.clone(),
+            // irradiance_cube_face_images.clone(),
+            vec![irradiance_cube_faces_img],
             "irradiance",
             1,
         )
@@ -215,23 +235,21 @@ fn run() -> Result<(), failure::Error> {
     // ENV TO SPECULAR
 
     let mut env_to_spec_faces_subpasses = Vec::new();
-    let mut spec_cube_face_images = Vec::new();
+    let mut spec_cube_faces_images = Vec::new();
 
     for mip_level in 0..SPEC_CUBEMAP_MIP_LEVELS {
         let res = SPEC_CUBEMAP_RES / 2u32.pow(mip_level as u32);
         let mut subpass = node::env_preprocess::env_to_specular::Pipeline::<Backend>::builder()
             .with_dependency(faces_to_env_pass)
             .into_subpass();
-        for _ in hal::image::CUBE_FACES.into_iter() {
-            let image = env_preprocess_graph_builder.create_image(
-                hal::image::Kind::D2(res, res, 1, 1),
-                1,
-                hal::format::Format::Rgba32Float,
-                Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
-            );
-            subpass.add_color(image);
-            spec_cube_face_images.push(image);
-        }
+        let image = env_preprocess_graph_builder.create_image(
+            hal::image::Kind::D2(res, res * 6, 1, 1),
+            1,
+            hal::format::Format::Rgba32Float,
+            Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
+        );
+        subpass.add_color(image);
+        spec_cube_faces_images.push(image);
         env_to_spec_faces_subpasses.push(subpass);
     }
 
@@ -244,7 +262,7 @@ fn run() -> Result<(), failure::Error> {
     }
 
     let mut builder = node::env_preprocess::faces_to_cubemap::FacesToCubemap::<Backend>::builder(
-        spec_cube_face_images.clone(),
+        spec_cube_faces_images.clone(),
         "specular",
         SPEC_CUBEMAP_MIP_LEVELS,
     );
@@ -422,8 +440,19 @@ fn run() -> Result<(), failure::Error> {
             &mut factory,
         )?;
 
+    use scene::Quality;
     let mut env_preprocess_aux = node::env_preprocess::Aux {
         align,
+        irradiance_theta_samples: match scene_config.environment_filter_quality {
+            Quality::High => 960,
+            Quality::Medium => 512,
+            Quality::Low => 256,
+        },
+        spec_samples: match scene_config.environment_filter_quality {
+            Quality::High => 8192,
+            Quality::Medium => 4096,
+            Quality::Low => 1024,
+        },
         equirectangular_texture: equirect_tex,
         environment_cubemap: Some(env_cubemap_tex),
         irradiance_cubemap: Some(irradiance_cubemap_tex),
@@ -459,7 +488,7 @@ fn run() -> Result<(), failure::Error> {
     let depth = pbr_graph_builder.create_image(
         surface.kind(),
         1,
-        hal::format::Format::D16Unorm,
+        hal::format::Format::D32Float,
         Some(hal::command::ClearValue::DepthStencil(
             hal::command::ClearDepthStencil(1.0, 0),
         )),
