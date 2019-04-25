@@ -1,6 +1,8 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
+layout(constant_id = 0) const uint SAMPLE_COUNT = 1024;
+
 layout(location = 0) in vec3 f_pos;
 layout(location = 1) flat in int face_index;
 
@@ -13,9 +15,7 @@ layout(std140, set = 0, binding = 0) uniform UniformArgs {
 layout(set = 0, binding = 1) uniform sampler env_sampler;
 layout(set = 0, binding = 2) uniform textureCube env_texture;
 
-layout(location = 0) out vec4 color[6];
-
-const uint SAMPLE_COUNT = 8192;
+layout(location = 0) out vec4 color;
 
 const float PI = 3.14159265359;
 
@@ -84,9 +84,9 @@ void main() {
 
     acc = acc / total_weight;
 
-    for (int i = 0; i < 6; i++) {
-        color[i] = vec4(0.0);
-    }
+    // for (int i = 0; i < 6; i++) {
+    //     color[i] = vec4(0.0);
+    // }
 
-    color[face_index] = vec4(acc, 1.0);
+    color = vec4(acc, 1.0);
 }

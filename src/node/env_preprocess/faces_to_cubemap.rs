@@ -28,7 +28,7 @@ impl<B: hal::Backend> FacesToCubemap<B> {
         cubemap_name: &str,
         mip_levels: u8,
     ) -> FacesToCubemapBuilder {
-        assert_eq!(faces.len(), 6 * mip_levels as usize);
+        assert_eq!(faces.len(), mip_levels as usize);
         FacesToCubemapBuilder {
             faces,
             mip_levels,
@@ -115,7 +115,7 @@ where
         images: Vec<NodeImage>,
     ) -> Result<Box<dyn DynNode<B, FR>>, failure::Error> {
         assert_eq!(buffers.len(), 0);
-        assert_eq!(images.len(), 6 * self.mip_levels as usize);
+        assert_eq!(images.len(), self.mip_levels as usize);
 
         let mut pool = factory.create_command_pool(family)?;
 
@@ -131,13 +131,11 @@ where
                 encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
             }
         }
-        for (i, face) in images.iter().enumerate() {
-            let dst_mip_level = i / 6;
-            let i = i as u16 % 6;
-            let image = ctx.get_image(face.id).unwrap();
+        for (i, cube_image) in images.iter().enumerate() {
+            let image = ctx.get_image(cube_image.id).unwrap();
             encoder.copy_image(
                 image.raw(),
-                face.layout,
+                cube_image.layout,
                 target_cubemap.image().raw(),
                 hal::image::Layout::TransferDstOptimal,
                 Some(hal::command::ImageCopy {
@@ -149,8 +147,8 @@ where
                     src_offset: hal::image::Offset::ZERO,
                     dst_subresource: hal::image::SubresourceLayers {
                         aspects: hal::format::Aspects::COLOR,
-                        level: dst_mip_level as u8,
-                        layers: i..i + 1,
+                        level: i as u8,
+                        layers: 0..6,
                     },
                     dst_offset: hal::image::Offset::ZERO,
                     extent: hal::image::Extent {

@@ -21,13 +21,12 @@ use crate::node::env_preprocess::Aux;
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct UniformArgs {
-    proj: nalgebra::Matrix4<f32>,
-    views: [nalgebra::Matrix4<f32>; 6],
+    unproject: [nalgebra::Matrix4<f32>; 6],
 }
 
 lazy_static::lazy_static! {
     static ref VERTEX: PathBufShaderInfo = PathBufShaderInfo::new(
-        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/equirectangular_to_cube_faces.vert"),
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/unproject_cubemap_tex.vert"),
         ShaderKind::Vertex,
         SourceLanguage::GLSL,
         "main",
@@ -267,53 +266,61 @@ where
         };
 
         let origin = nalgebra::Point3::origin();
+        let proj = {
+            let mut proj = nalgebra::Perspective3::<f32>::new(
+                1.0,
+                std::f32::consts::FRAC_PI_2,
+                0.1,
+                100.0,
+            )
+            .to_homogeneous();
+            proj[(1, 1)] *= -1.0;
+            proj
+        };
+        let views = [
+            nalgebra::Matrix4::look_at_rh(
+                &origin,
+                &nalgebra::Point3::new(1.0, 0.0, 0.0),
+                &nalgebra::Vector3::y(),
+            ),
+            nalgebra::Matrix4::look_at_rh(
+                &origin,
+                &nalgebra::Point3::new(-1.0, 0.0, 0.0),
+                &nalgebra::Vector3::y(),
+            ),
+            nalgebra::Matrix4::look_at_rh(
+                &origin,
+                &nalgebra::Point3::new(0.0, 1.0, 0.0),
+                &nalgebra::Vector3::z(),
+            ),
+            nalgebra::Matrix4::look_at_rh(
+                &origin,
+                &nalgebra::Point3::new(0.0, -1.0, 0.0),
+                &-nalgebra::Vector3::z(),
+            ),
+            nalgebra::Matrix4::look_at_rh(
+                &origin,
+                &nalgebra::Point3::new(0.0, 0.0, 1.0),
+                &nalgebra::Vector3::y(),
+            ),
+            nalgebra::Matrix4::look_at_rh(
+                &origin,
+                &nalgebra::Point3::new(0.0, 0.0, -1.0),
+                &nalgebra::Vector3::y(),
+            ),
+        ];
         unsafe {
             factory.upload_visible_buffer(
                 &mut buffer,
                 0,
                 &[UniformArgs {
-                    proj: {
-                        let mut proj = nalgebra::Perspective3::<f32>::new(
-                            1.0,
-                            std::f32::consts::FRAC_PI_2,
-                            0.1,
-                            100.0,
-                        )
-                        .to_homogeneous();
-                        proj[(1, 1)] *= -1.0;
-                        proj
-                    },
-                    views: [
-                        nalgebra::Matrix4::look_at_rh(
-                            &origin,
-                            &nalgebra::Point3::new(1.0, 0.0, 0.0),
-                            &nalgebra::Vector3::y(),
-                        ),
-                        nalgebra::Matrix4::look_at_rh(
-                            &origin,
-                            &nalgebra::Point3::new(-1.0, 0.0, 0.0),
-                            &nalgebra::Vector3::y(),
-                        ),
-                        nalgebra::Matrix4::look_at_rh(
-                            &origin,
-                            &nalgebra::Point3::new(0.0, 1.0, 0.0),
-                            &nalgebra::Vector3::z(),
-                        ),
-                        nalgebra::Matrix4::look_at_rh(
-                            &origin,
-                            &nalgebra::Point3::new(0.0, -1.0, 0.0),
-                            &-nalgebra::Vector3::z(),
-                        ),
-                        nalgebra::Matrix4::look_at_rh(
-                            &origin,
-                            &nalgebra::Point3::new(0.0, 0.0, 1.0),
-                            &nalgebra::Vector3::y(),
-                        ),
-                        nalgebra::Matrix4::look_at_rh(
-                            &origin,
-                            &nalgebra::Point3::new(0.0, 0.0, -1.0),
-                            &nalgebra::Vector3::y(),
-                        ),
+                    unproject: [
+                        (proj * views[0]).try_inverse().unwrap(),
+                        (proj * views[1]).try_inverse().unwrap(),
+                        (proj * views[2]).try_inverse().unwrap(),
+                        (proj * views[3]).try_inverse().unwrap(),
+                        (proj * views[4]).try_inverse().unwrap(),
+                        (proj * views[5]).try_inverse().unwrap(),
                     ],
                 }],
             )?
