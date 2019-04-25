@@ -106,7 +106,7 @@ pub enum GltfMesh {
 
 impl SceneConfig {
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, failure::Error> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path.as_ref());
+        let path = Path::new(&crate::application_root_dir()).join(path.as_ref());
         let file = File::open(path).unwrap();
         let reader = std::io::BufReader::new(file);
         ron::de::from_reader(reader).map_err(From::from)
@@ -138,7 +138,7 @@ impl SceneConfig {
             .gltf_sources
             .drain(..)
             .map(|path| {
-                let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path.0);
+                let base_path = Path::new(&crate::application_root_dir()).join(path.0);
                 let file = File::open(base_path.join(path.1)).unwrap();
                 let reader = std::io::BufReader::new(file);
                 (gltf::Gltf::from_reader(reader).unwrap(), base_path.clone())

@@ -9,7 +9,7 @@ use rendy::{
         Buffer, BufferInfo, DescriptorSetLayout, Escape, Filter, Handle, Sampler, SamplerInfo,
         WrapMode,
     },
-    shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
+    shader::{PathBufShaderInfo, Shader, ShaderKind, SourceLanguage},
 };
 
 use std::mem::size_of;
@@ -23,15 +23,15 @@ use crate::{
 };
 
 lazy_static::lazy_static! {
-    static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/pbr.vert"),
+    static ref VERTEX: PathBufShaderInfo = PathBufShaderInfo::new(
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/pbr.vert"),
         ShaderKind::Vertex,
         SourceLanguage::GLSL,
         "main",
     );
 
-    static ref FRAGMENT: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/pbr.frag"),
+    static ref FRAGMENT: PathBufShaderInfo = PathBufShaderInfo::new(
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/pbr.frag"),
         ShaderKind::Fragment,
         SourceLanguage::GLSL,
         "main",

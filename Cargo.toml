@@ -42,7 +42,7 @@ rev = "acf33a93e82aea16fd36e81f9a667d5b2ab064a1"
 
 [dependencies.rendy]
 optional = true
-path = "../rendy/rendy"
+# path = "../rendy/rendy"
 features = ["texture-image"]
-# git = "https://github.com/termhn/rendy"
-# rev = "9b03424629f70fce2535f4cf9ea09b23608007a7"
+git = "https://github.com/termhn/rendy"
+rev = "76de025e1a63754ab577ebf3a94eb0eda47b3d48"
