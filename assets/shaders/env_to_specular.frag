@@ -7,8 +7,6 @@ layout(location = 0) in vec3 f_pos;
 layout(location = 1) flat in int face_index;
 
 layout(std140, set = 0, binding = 0) uniform UniformArgs {
-    mat4 proj;
-    mat4 view[6];
     float roughness;
 };
 
@@ -59,12 +57,6 @@ vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness)
 
 void main() {
     vec3 pos = f_pos;
-    if (face_index < 4) {
-        pos.z *= -1.0;
-    }
-    if (face_index > 3) {
-        pos.x *= -1.0;
-    }
     vec3 N = normalize(pos);
     vec3 R = N;
     vec3 V = R;

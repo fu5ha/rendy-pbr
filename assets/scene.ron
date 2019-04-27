@@ -2,35 +2,35 @@ SceneConfig(
     // environment_map: "assets/environment/WinterForest_Ref.hdr",
     // environment_map: "assets/environment/abandoned_hall_01_4k.hdr",
     // environment_map: "assets/environment/rathaus_4k.hdr",
-    environment_map: "assets/environment/small_hangar_01_4k.hdr",
+    // environment_map: "assets/environment/small_hangar_01_4k.hdr",
     // environment_map: "assets/environment/georgentor_4k.hdr",
-    // environment_map: "assets/environment/venice_sunrise_4k.hdr",
-    environment_filter_quality: Low,
+    environment_map: "assets/environment/venice_sunrise_4k.hdr",
+    environment_filter_quality: Medium,
     gltf_sources: [
-        // ("assets/gltf/SciFiHelmet", "SciFiHelmet.gltf"),
-        // ("assets/gltf/Corset", "Corset.gltf"),
+        ("assets/gltf/SciFiHelmet", "SciFiHelmet.gltf"),
+        ("assets/gltf/Corset", "Corset.gltf"),
         ("assets/gltf/FlightHelmet", "FlightHelmet.gltf"),
     ],
     entities: [
         // SciFi Helmet
-        // SceneEntity(
-        //     transform: Manual((
-        //         scale: 0.15,
-        //         // euler_rotation: (0.0, 3.14159, 0.0),
-        //     )),
-        //     mesh: Some(Mesh(Index(0, 0))),
-        //     parent: None,
-        // ),
-        // // Corset
-        // SceneEntity(
-        //     transform: Manual((
-        //         translation: (0.5, -0.4, 0.0),
-        //         scale: 10.0,
-        //         euler_rotation: (0.0, 3.14159, 0.0),
-        //     )),
-        //     mesh: Some(Mesh(Index(1, 0))),
-        //     parent: None,
-        // ),
+        SceneEntity(
+            transform: Manual((
+                scale: 0.15,
+                // euler_rotation: (0.0, 3.14159, 0.0),
+            )),
+            mesh: Some(Mesh(Index(0, 0))),
+            parent: None,
+        ),
+        // Corset
+        SceneEntity(
+            transform: Manual((
+                translation: (0.5, -0.4, 0.0),
+                scale: 10.0,
+                euler_rotation: (0.0, 3.14159, 0.0),
+            )),
+            mesh: Some(Mesh(Index(1, 0))),
+            parent: None,
+        ),
         // Flight helmet root
         SceneEntity(
             transform: Manual((
@@ -40,29 +40,29 @@ SceneConfig(
         ),
         // Flight helmet pieces
         SceneEntity(
-            transform: Gltf(Index(0, 0)),
-            mesh: Some(Node(Index(0, 0))),
-            parent: Some(0),
+            transform: Gltf(Index(2, 0)),
+            mesh: Some(Node(Index(2, 0))),
+            parent: Some(2),
         ),
         SceneEntity(
-            transform: Gltf(Index(0, 1)),
-            mesh: Some(Node(Index(0, 1))),
-            parent: Some(0),
+            transform: Gltf(Index(2, 1)),
+            mesh: Some(Node(Index(2, 1))),
+            parent: Some(2),
         ),
         SceneEntity(
-            transform: Gltf(Index(0, 2)),
-            mesh: Some(Node(Index(0, 2))),
-            parent: Some(0),
+            transform: Gltf(Index(2, 2)),
+            mesh: Some(Node(Index(2, 2))),
+            parent: Some(2),
         ),
         SceneEntity(
-            transform: Gltf(Index(0, 3)),
-            mesh: Some(Node(Index(0, 3))),
-            parent: Some(0),
+            transform: Gltf(Index(2, 3)),
+            mesh: Some(Node(Index(2, 3))),
+            parent: Some(2),
         ),
         SceneEntity(
-            transform: Gltf(Index(0, 4)),
-            mesh: Some(Node(Index(0, 4))),
-            parent: Some(0),
+            transform: Gltf(Index(2, 4)),
+            mesh: Some(Node(Index(2, 4))),
+            parent: Some(2),
         ),
         // Camera
         SceneEntity(

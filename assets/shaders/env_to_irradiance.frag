@@ -6,8 +6,8 @@ layout(constant_id = 0) const int THETA_SAMPLES = 256;
 layout(location = 0) in vec3 f_pos;
 layout(location = 1) flat in int face_index;
 
-layout(set = 0, binding = 1) uniform sampler env_sampler;
-layout(set = 0, binding = 2) uniform textureCube env_texture;
+layout(set = 0, binding = 0) uniform sampler env_sampler;
+layout(set = 0, binding = 1) uniform textureCube env_texture;
 
 const float PI = 3.14159265359;
 
@@ -17,12 +17,6 @@ layout(location = 0) out vec4 color;
 
 void main() {
     vec3 pos = f_pos;
-    if (face_index < 4) {
-        pos.z *= -1.0;
-    }
-    if (face_index > 3) {
-        pos.x *= -1.0;
-    }
     vec3 N = normalize(pos);
 
     vec3 irradiance = vec3(0.0);

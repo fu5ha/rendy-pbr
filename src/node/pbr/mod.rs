@@ -17,11 +17,7 @@ pub struct CameraArgs {
 impl From<(&components::Camera, &components::GlobalTransform)> for CameraArgs {
     fn from((cam, trans): (&components::Camera, &components::GlobalTransform)) -> Self {
         CameraArgs {
-            proj: {
-                let mut proj = cam.proj.to_homogeneous();
-                proj[(1, 1)] *= -1.0;
-                proj
-            },
+            proj: cam.proj.to_homogeneous(),
             view: trans.0.try_inverse().unwrap(),
             camera_pos: nalgebra::Point3::from(trans.0.column(3).xyz()),
         }

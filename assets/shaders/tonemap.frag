@@ -73,7 +73,9 @@ vec3 aces_fitted(vec3 color)
 }
 
 void main() {
-    vec3 hdrColor = texture(sampler2D(hdr_tex, tex_sampler), f_uv).rgb;
+    vec2 uv = f_uv;
+    uv.y = 1.0 - uv.y;
+    vec3 hdrColor = texture(sampler2D(hdr_tex, tex_sampler), uv).rgb;
 
     hdrColor *= exposure; // exposure
 
@@ -87,7 +89,7 @@ void main() {
         factor = comparison_factor;
     }
 
-    vec3 mapped = mix(aces_fitted(hdrColor), tonemapUncharted2(hdrColor), step(f_uv.x, factor));
+    vec3 mapped = mix(aces_fitted(hdrColor), tonemapUncharted2(hdrColor), step(uv.x, factor));
 
     color = vec4(mapped, 1.0);
 }
