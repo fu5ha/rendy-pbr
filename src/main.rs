@@ -350,7 +350,7 @@ fn run() -> Result<(), failure::Error> {
             6,
             1,
         ))
-        .with_mip_levels(SPEC_CUBEMAP_MIP_LEVELS)
+        .with_mip_levels(rendy::texture::MipLevels::RawLevels(std::num::NonZeroU8::new(SPEC_CUBEMAP_MIP_LEVELS))
         .with_view_kind(rendy::resource::ViewKind::Cube)
         .with_data_width(SPEC_CUBEMAP_RES)
         .with_data_height(SPEC_CUBEMAP_RES)
