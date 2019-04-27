@@ -1,15 +1,9 @@
-use genmesh::{
-    generators::{IndexedPolygon, SharedVertex},
-    Triangulate,
-};
-
 use rendy::{
     command::{QueueId, RenderPassEncoder},
     factory::Factory,
     graph::{render::*, GraphContext, NodeBuffer, NodeImage},
     hal::{pso::DescriptorPool, Device},
     memory::MemoryUsageValue,
-    mesh::{AsVertex, Mesh, Position},
     resource::{Buffer, BufferInfo, DescriptorSetLayout, Escape, Handle},
     shader::{PathBufShaderInfo, Shader, ShaderKind, SourceLanguage},
 };
@@ -21,7 +15,6 @@ use crate::node::env_preprocess::Aux;
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct UniformArgs {
-    unproject: [nalgebra::Matrix4<f32>; 6],
     roughness: f32,
 }
 
@@ -75,7 +68,6 @@ impl Settings {
 pub struct PipelineDesc;
 
 pub struct Pipeline<B: hal::Backend> {
-    cube: Mesh<B>,
     set: B::DescriptorSet,
     pool: B::DescriptorPool,
     #[allow(dead_code)]
@@ -94,18 +86,8 @@ where
 {
     type Pipeline = Pipeline<B>;
 
-    fn vertices(
-        &self,
-    ) -> Vec<(
-        Vec<hal::pso::Element<hal::format::Format>>,
-        hal::pso::ElemStride,
-        hal::pso::InstanceRate,
-    )> {
-        vec![Position::VERTEX.gfx_vertex_input_desc(0)]
-    }
-
     fn colors(&self) -> Vec<hal::pso::ColorBlendDesc> {
-        vec![hal::pso::ColorBlendDesc(hal::pso::ColorMask::ALL, hal::pso::BlendState::ALPHA,); 6]
+        vec![hal::pso::ColorBlendDesc(hal::pso::ColorMask::ALL, hal::pso::BlendState::Off,); 1]
     }
 
     fn depth_stencil(&self) -> Option<hal::pso::DepthStencilDesc> {
@@ -181,7 +163,7 @@ where
         self,
         _ctx: &GraphContext<B>,
         factory: &mut Factory<B>,
-        queue: QueueId,
+        _queue: QueueId,
         aux: &Aux<B>,
         buffers: Vec<NodeBuffer>,
         images: Vec<NodeImage>,
@@ -190,21 +172,6 @@ where
         assert!(buffers.is_empty());
         assert!(images.is_empty());
         assert!(set_layouts.len() == 1);
-
-        let cube = genmesh::generators::Cube::new();
-        let cube_vertices: Vec<_> = cube
-            .shared_vertex_iter()
-            .map(|v| Position(v.pos.into()))
-            .collect();
-
-        let cube_flattened_vertices: Vec<_> =
-            genmesh::Vertices::vertices(cube.indexed_polygon_iter().triangulate())
-                .map(|i| cube_vertices[i])
-                .collect();
-
-        let cube = Mesh::<B>::builder()
-            .with_vertices(&cube_flattened_vertices[..])
-            .build(queue, factory)?;
 
         let mut pool = unsafe {
             factory.create_descriptor_pool(
@@ -269,63 +236,11 @@ where
             set
         };
 
-        let origin = nalgebra::Point3::origin();
-        let proj = {
-            let mut proj = nalgebra::Perspective3::<f32>::new(
-                1.0,
-                std::f32::consts::FRAC_PI_2,
-                0.1,
-                100.0,
-            )
-            .to_homogeneous();
-            proj[(1, 1)] *= -1.0;
-            proj
-        };
-        let views = [
-            nalgebra::Matrix4::look_at_rh(
-                &origin,
-                &nalgebra::Point3::new(1.0, 0.0, 0.0),
-                &nalgebra::Vector3::y(),
-            ),
-            nalgebra::Matrix4::look_at_rh(
-                &origin,
-                &nalgebra::Point3::new(-1.0, 0.0, 0.0),
-                &nalgebra::Vector3::y(),
-            ),
-            nalgebra::Matrix4::look_at_rh(
-                &origin,
-                &nalgebra::Point3::new(0.0, 1.0, 0.0),
-                &nalgebra::Vector3::z(),
-            ),
-            nalgebra::Matrix4::look_at_rh(
-                &origin,
-                &nalgebra::Point3::new(0.0, -1.0, 0.0),
-                &-nalgebra::Vector3::z(),
-            ),
-            nalgebra::Matrix4::look_at_rh(
-                &origin,
-                &nalgebra::Point3::new(0.0, 0.0, 1.0),
-                &nalgebra::Vector3::y(),
-            ),
-            nalgebra::Matrix4::look_at_rh(
-                &origin,
-                &nalgebra::Point3::new(0.0, 0.0, -1.0),
-                &nalgebra::Vector3::y(),
-            ),
-        ];
         unsafe {
             factory.upload_visible_buffer(
                 &mut buffer,
                 0,
                 &[UniformArgs {
-                    unproject: [
-                        (proj * views[0]).try_inverse().unwrap(),
-                        (proj * views[1]).try_inverse().unwrap(),
-                        (proj * views[2]).try_inverse().unwrap(),
-                        (proj * views[3]).try_inverse().unwrap(),
-                        (proj * views[4]).try_inverse().unwrap(),
-                        (proj * views[5]).try_inverse().unwrap(),
-                    ],
                     roughness: aux
                         .mip_level
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -335,12 +250,7 @@ where
             )?
         };
 
-        Ok(Pipeline {
-            cube,
-            set,
-            pool,
-            buffer,
-        })
+        Ok(Pipeline { set, pool, buffer })
     }
 }
 
@@ -368,9 +278,8 @@ where
         _index: usize,
         _aux: &Aux<B>,
     ) {
-        assert!(self.cube.bind(&[Position::VERTEX], &mut encoder).is_ok());
         encoder.bind_graphics_descriptor_sets(layout, 0, Some(&self.set), std::iter::empty());
-        encoder.draw(0..36, 0..1);
+        encoder.draw(0..6, 0..6);
     }
 
     fn dispose(mut self, factory: &mut Factory<B>, _aux: &Aux<B>) {

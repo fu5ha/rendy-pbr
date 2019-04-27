@@ -131,33 +131,40 @@ where
                 encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
             }
         }
-        for (i, cube_image) in images.iter().enumerate() {
+        for (mip_level, cube_image) in images.iter().enumerate() {
             let image = ctx.get_image(cube_image.id).unwrap();
-            encoder.copy_image(
-                image.raw(),
-                cube_image.layout,
-                target_cubemap.image().raw(),
-                hal::image::Layout::TransferDstOptimal,
-                Some(hal::command::ImageCopy {
-                    src_subresource: hal::image::SubresourceLayers {
-                        aspects: hal::format::Aspects::COLOR,
-                        level: 0,
-                        layers: 0..1,
-                    },
-                    src_offset: hal::image::Offset::ZERO,
-                    dst_subresource: hal::image::SubresourceLayers {
-                        aspects: hal::format::Aspects::COLOR,
-                        level: i as u8,
-                        layers: 0..6,
-                    },
-                    dst_offset: hal::image::Offset::ZERO,
-                    extent: hal::image::Extent {
-                        width: image.kind().extent().width,
-                        height: image.kind().extent().height,
-                        depth: 1,
-                    },
-                }),
-            );
+            let layer_height = image.kind().extent().height / 6;
+            for layer in 0..6 {
+                encoder.copy_image(
+                    image.raw(),
+                    cube_image.layout,
+                    target_cubemap.image().raw(),
+                    hal::image::Layout::TransferDstOptimal,
+                    Some(hal::command::ImageCopy {
+                        src_subresource: hal::image::SubresourceLayers {
+                            aspects: hal::format::Aspects::COLOR,
+                            level: 0,
+                            layers: 0..1,
+                        },
+                        src_offset: hal::image::Offset {
+                            x: 0,
+                            y: (layer_height * layer) as i32,
+                            z: 0,
+                        },
+                        dst_subresource: hal::image::SubresourceLayers {
+                            aspects: hal::format::Aspects::COLOR,
+                            level: mip_level as u8,
+                            layers: (layer as u16)..(layer as u16 + 1),
+                        },
+                        dst_offset: hal::image::Offset::ZERO,
+                        extent: hal::image::Extent {
+                            width: image.kind().extent().width,
+                            height: image.kind().extent().height / 6,
+                            depth: 1,
+                        },
+                    }),
+                );
+            }
         }
         {
             let (mut stages, mut barriers) = gfx_release_barriers(ctx, None, images.iter());

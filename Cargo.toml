@@ -16,10 +16,11 @@ metal = ["rendy/metal"]
 dx12 = ["rendy/dx12"]
 vulkan = ["rendy/vulkan"]
 empty = ["rendy/empty"]
+rd = ["renderdoc"]
 
 [dependencies]
 genmesh = "0.6"
-nalgebra = { version = "0.17" }
+nalgebra = "0.17"
 env_logger = "0.5"
 failure = "0.1"
 lazy_static = "1.0"
@@ -34,6 +35,10 @@ specs-hierarchy = "0.3"
 hibitset = "0.5"
 ron = "0.5"
 serde = "1.0"
+
+[dependencies.renderdoc]
+version = "0.4"
+optional = true
 
 [dependencies.gltf]
 # git = "https://github.com/gltf-rs/gltf"

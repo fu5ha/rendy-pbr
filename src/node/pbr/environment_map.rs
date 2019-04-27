@@ -416,7 +416,7 @@ where
             vec![&self.ubo_sets[index], cube_set],
             std::iter::empty(),
         );
-        encoder.draw(0..36, 0..6);
+        encoder.draw(0..36, 0..1);
     }
 
     fn dispose(mut self, factory: &mut Factory<B>, _aux: &specs::World) {
