@@ -34,7 +34,7 @@ SceneConfig(
         // Flight helmet root
         SceneEntity(
             transform: Manual((
-                // translation: (-0.5, 0.0, 0.0),
+                translation: (-0.5, 0.0, 0.0),
                 euler_rotation: (0.0, 3.14159, 0.0),
             )),
         ),

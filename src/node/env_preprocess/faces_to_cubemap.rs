@@ -3,16 +3,22 @@ use rendy::{
         CommandBuffer, CommandPool, ExecutableState, Family, FamilyId, Fence, MultiShot,
         PendingState, Queue, SimultaneousUse, Submission, Submit, Supports, Transfer,
     },
-    factory::{Factory, ImageState},
+    factory::{Blitter, Factory, ImageState},
     frame::Frames,
     graph::{
         gfx_acquire_barriers, gfx_release_barriers, BufferAccess, BufferId, DynNode, GraphContext,
         ImageAccess, ImageId, NodeBuffer, NodeBuilder, NodeId, NodeImage,
     },
-    texture::Texture,
+    texture::{mip_levels_from_dims, Texture},
 };
 
 use rendy::hal;
+
+#[derive(Debug)]
+pub struct CopyMips {
+    GenerateMips,
+    CopyMips(u8),
+}
 
 #[derive(Debug)]
 pub struct FacesToCubemap<B: hal::Backend> {
@@ -26,12 +32,14 @@ impl<B: hal::Backend> FacesToCubemap<B> {
     pub fn builder(
         faces: Vec<ImageId>,
         cubemap_name: &str,
-        mip_levels: u8,
+        mips: CopyMips,
     ) -> FacesToCubemapBuilder {
-        assert_eq!(faces.len(), mip_levels as usize);
+        if let CopyMips(mip_levels) = mips {
+            assert_eq!(faces.len(), mip_levels as usize);
+        }
         FacesToCubemapBuilder {
             faces,
-            mip_levels,
+            mips,
             cubemap_name: String::from(cubemap_name),
             dependencies: vec![],
         }
@@ -41,7 +49,7 @@ impl<B: hal::Backend> FacesToCubemap<B> {
 #[derive(Debug)]
 pub struct FacesToCubemapBuilder {
     faces: Vec<ImageId>,
-    mip_levels: u8,
+    mips: CopyMips,
     cubemap_name: String,
     dependencies: Vec<NodeId>,
 }
@@ -115,6 +123,11 @@ where
         images: Vec<NodeImage>,
     ) -> Result<Box<dyn DynNode<B, FR>>, failure::Error> {
         assert_eq!(buffers.len(), 0);
+        if let CopyMips(mip_levels) = self.mips {
+            assert_eq!(images.len(), mip_levels as usize);
+        } else {
+            assert_eq!(images.len(), 1);
+        }
         assert_eq!(images.len(), self.mip_levels as usize);
 
         let mut pool = factory.create_command_pool(family)?;
@@ -131,6 +144,7 @@ where
                 encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
             }
         }
+
         for (mip_level, cube_image) in images.iter().enumerate() {
             let image = ctx.get_image(cube_image.id).unwrap();
             let layer_height = image.kind().extent().height / 6;
@@ -166,9 +180,16 @@ where
                 );
             }
         }
+
+        let end_state = aux.cubemap_end_state(&self.cubemap_name);
+
+        if let CopyMips::GenerateMips = self.mips {
+            assert_gt!(target_cubemap.kind().extent().num_levels(), 1);
+
+        }
+
         {
             let (mut stages, mut barriers) = gfx_release_barriers(ctx, None, images.iter());
-            let end_state = aux.cubemap_end_state(&self.cubemap_name);
             stages.start |= hal::pso::PipelineStage::TRANSFER;
             stages.end |= end_state.stage;
             barriers.push(hal::memory::Barrier::Image {
