@@ -46,8 +46,5 @@ void main() {
     
     irradiance = PI * irradiance * (1.0 / float(THETA_SAMPLES * PHI_SAMPLES));
 
-    // for (int i = 0; i < 6; i++) {
-    //     color[i] = vec4(0.0);
-    // }
     color = vec4(irradiance, 1.0);
 }

@@ -388,7 +388,11 @@ where
                     &[UniformArgs {
                         proj: camera_args.proj,
                         view: camera_args.view,
-                        roughness: aux.cube_roughness,
+                        roughness: match aux.cube_display {
+                            CubeDisplay::Irradiance => 0.0,
+                            CubeDisplay::Environment => 0.0,
+                            CubeDisplay::Specular => aux.cube_roughness,
+                        },
                     }],
                 )
                 .unwrap()

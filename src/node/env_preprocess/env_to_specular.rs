@@ -16,6 +16,7 @@ use crate::node::env_preprocess::Aux;
 #[repr(C)]
 pub struct UniformArgs {
     roughness: f32,
+    resolution: f32,
 }
 
 lazy_static::lazy_static! {
@@ -246,6 +247,7 @@ where
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                         as f32
                         / (crate::SPEC_CUBEMAP_MIP_LEVELS - 1) as f32,
+                    resolution: crate::ENV_CUBEMAP_RES as f32,
                 }],
             )?
         };

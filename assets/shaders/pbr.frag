@@ -32,6 +32,10 @@ layout(set = 2, binding = 0) uniform texture2D albedo_map;
 layout(set = 2, binding = 1) uniform texture2D normal_map;
 layout(set = 2, binding = 2) uniform texture2D metallic_roughness_map;
 layout(set = 2, binding = 3) uniform texture2D ao_map;
+layout(set = 2, binding = 4) uniform texture2D emissive_map;
+layout(std140, set = 2, binding = 5) uniform MatData {
+    vec3 emissive_factor;
+};
 
 layout(location = 0) out vec4 color;
 
@@ -75,6 +79,7 @@ void main() {
     float metallic = metallic_roughness.x;
     float roughness = metallic_roughness.y;
     float ao = texture(sampler2D(ao_map, tex_sampler), f_uv).r;
+    vec3 emissive = texture(sampler2D(emissive_map, tex_sampler), f_uv).rgb;
 
     normal = normal * 2.0 - 1.0;
 
@@ -127,7 +132,6 @@ void main() {
         acc += (diffuse + specular) * NdotL * l_contrib;
     }
 
-
-    vec3 final = ambient * ao + acc;
+    vec3 final = ambient * ao + acc + emissive * emissive_factor;
     color = vec4(final, 1.0);
 }

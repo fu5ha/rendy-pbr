@@ -114,7 +114,7 @@ where
 
         {
             let (stages, barriers) = gfx_acquire_barriers(ctx, None, images.iter());
-            log::info!("Acquire {:?} : {:#?}", stages, barriers);
+            log::trace!("Acquire {:?} : {:#?}", stages, barriers);
             if !barriers.is_empty() {
                 encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
             }
@@ -166,7 +166,7 @@ where
                 },
             });
 
-            log::info!("Release {:?} : {:#?}", stages, barriers);
+            log::trace!("Release {:?} : {:#?}", stages, barriers);
             encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
         }
 
