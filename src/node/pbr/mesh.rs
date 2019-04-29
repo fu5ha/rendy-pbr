@@ -204,7 +204,7 @@ where
         };
         // SampledImage for each texture map, can reuse same sampler
         let mut bindings = Vec::with_capacity(4);
-        for i in 0..4 {
+        for i in 0..5 {
             bindings.push(hal::pso::DescriptorSetLayoutBinding {
                 binding: i,
                 ty: hal::pso::DescriptorType::SampledImage,
@@ -213,6 +213,13 @@ where
                 immutable_samplers: false,
             });
         }
+        bindings.push(hal::pso::DescriptorSetLayoutBinding {
+            binding: 5,
+            ty: hal::pso::DescriptorType::UniformBuffer,
+            count: 1,
+            stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+            immutable_samplers: false,
+        });
         let material_layout = SetLayout { bindings };
         Layout {
             sets: vec![static_layout, ubo_layout, material_layout],
@@ -292,7 +299,7 @@ where
                 vec![
                     hal::pso::DescriptorRangeDesc {
                         ty: hal::pso::DescriptorType::UniformBuffer,
-                        count: frames,
+                        count: frames + num_mats,
                     },
                     hal::pso::DescriptorRangeDesc {
                         ty: hal::pso::DescriptorType::Sampler,
@@ -300,7 +307,7 @@ where
                     },
                     hal::pso::DescriptorRangeDesc {
                         ty: hal::pso::DescriptorType::SampledImage,
-                        count: (num_mats * 4) + (num_env_maps),
+                        count: (num_mats * 5) + (num_env_maps),
                     },
                 ],
             )?
@@ -426,6 +433,24 @@ where
                             hal::image::Layout::ShaderReadOnlyOptimal,
                         )),
                     },
+                    hal::pso::DescriptorSetWrite {
+                        set: &set,
+                        binding: 4,
+                        array_offset: 0,
+                        descriptors: Some(hal::pso::Descriptor::Image(
+                            mat_data.emissive.view().raw(),
+                            hal::image::Layout::ShaderReadOnlyOptimal,
+                        )),
+                    },
+                    hal::pso::DescriptorSetWrite {
+                        set: &set,
+                        binding: 5,
+                        array_offset: 0,
+                        descriptors: Some(hal::pso::Descriptor::Buffer(
+                            mat_data.emissive_factor_buffer.raw(),
+                            None..None,
+                        )),
+                    },
                 ]);
                 mat_sets.push(set);
             }
@@ -506,7 +531,6 @@ where
         };
 
         let instance_cache = world.read_resource::<systems::InstanceCache>();
-        // log::debug!("cache: {:?}", *instance_cache);
         let mesh_storage = world.read_resource::<asset::MeshStorage>();
         let primitive_storage = world.read_resource::<asset::PrimitiveStorage<B>>();
 

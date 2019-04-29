@@ -3,8 +3,10 @@ use failure::format_err;
 use rendy::hal;
 use rendy::{
     command::QueueId,
-    factory::{Factory, ImageState},
+    factory::{BufferState, Factory, ImageState},
+    memory::MemoryUsageValue,
     mesh::PosNormTangTex,
+    resource::{Buffer, BufferInfo, Escape},
     texture::{
         image::{ImageTextureConfig, Repr},
         Texture, TextureBuilder,
@@ -29,6 +31,8 @@ pub struct MaterialData<B: hal::Backend> {
     pub normal: Texture<B>,
     pub metallic_roughness: Texture<B>,
     pub ao: Texture<B>,
+    pub emissive: Texture<B>,
+    pub emissive_factor_buffer: Escape<Buffer<B>>,
 }
 
 #[derive(Default)]
@@ -108,6 +112,7 @@ impl GltfBuffers {
 pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
     mesh: &gltf::Mesh<'_>,
     max_instances: u16,
+    generate_mips: bool,
     base_dir: P,
     buffers: &GltfBuffers,
     base_mesh_index: usize,
@@ -191,6 +196,7 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                         .ok_or(format_err!("Material has no base color texture"))?
                         .texture(),
                     true,
+                    generate_mips,
                 )?
                 .build(state, factory)?;
 
@@ -201,6 +207,7 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                         .ok_or(format_err!("Material has no metallic_roughness texture"))?
                         .texture(),
                     false,
+                    generate_mips,
                 )?
                 .build(state, factory)?;
 
@@ -211,6 +218,7 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                         .ok_or(format_err!("Material has no normal texture"))?
                         .texture(),
                     false,
+                    generate_mips,
                 )?
                 .build(state, factory)?;
 
@@ -221,8 +229,45 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                         .ok_or(format_err!("Material has no occlusion texture"))?
                         .texture(),
                     false,
+                    generate_mips,
                 )?
                 .build(state, factory)?;
+
+                let emissive = if let Some(emissive_info) = material.emissive_texture() {
+                    load_gltf_texture(&base_dir, emissive_info.texture(), true, generate_mips)?
+                        .build(state, factory)?
+                } else {
+                    rendy::texture::TextureBuilder::new()
+                        .with_data(vec![rendy::texture::pixel::Rgb8Srgb { repr: [0, 0, 0] }])
+                        .with_data_width(1)
+                        .with_data_height(1)
+                        .with_kind(hal::image::Kind::D2(1, 1, 1, 1))
+                        .with_view_kind(hal::image::ViewKind::D2)
+                        .build(state, factory)?
+                };
+
+                let emissive_factor = material.emissive_factor();
+                let emissive_factor_buffer = factory.create_buffer(
+                    BufferInfo {
+                        size: std::mem::size_of::<[f32; 3]>() as u64,
+                        usage: hal::buffer::Usage::UNIFORM | hal::buffer::Usage::TRANSFER_DST,
+                    },
+                    MemoryUsageValue::Data,
+                )?;
+
+                unsafe {
+                    factory.upload_buffer(
+                        &emissive_factor_buffer,
+                        0,
+                        &emissive_factor,
+                        None,
+                        BufferState {
+                            queue,
+                            stage: hal::pso::PipelineStage::FRAGMENT_SHADER,
+                            access: hal::buffer::Access::SHADER_READ,
+                        },
+                    )?;
+                }
 
                 material_storage[mat_idx] = Some(MaterialData {
                     factors,
@@ -230,6 +275,8 @@ pub fn load_gltf_mesh<P: AsRef<Path>, B: hal::Backend>(
                     metallic_roughness,
                     normal,
                     ao,
+                    emissive,
+                    emissive_factor_buffer,
                 });
             }
 
@@ -255,6 +302,7 @@ fn load_gltf_texture<P>(
     base_dir: P,
     texture: gltf::Texture<'_>,
     srgb: bool,
+    generate_mips: bool,
 ) -> Result<TextureBuilder<'static>, failure::Error>
 where
     P: AsRef<Path>,
@@ -263,7 +311,7 @@ where
         gltf::image::Source::View { .. } => unimplemented!(),
         gltf::image::Source::Uri { uri, .. } => {
             let path = base_dir.as_ref().join(uri);
-            log::trace!("Loading image: {:#?}", path);
+            log::info!("Loading image: {:#?}", path);
             rendy::texture::image::load_from_image(
                 std::io::BufReader::new(File::open(path)?),
                 ImageTextureConfig {
@@ -271,6 +319,7 @@ where
                         true => Repr::Srgb,
                         false => Repr::Unorm,
                     },
+                    generate_mips,
                     ..Default::default()
                 },
             )

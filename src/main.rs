@@ -26,6 +26,7 @@ mod systems;
 mod transform;
 
 pub const ENV_CUBEMAP_RES: u32 = 1024;
+pub const ENV_CUBEMAP_MIP_LEVELS: u8 = 6;
 pub const IRRADIANCE_CUBEMAP_RES: u32 = 64;
 pub const SPEC_CUBEMAP_RES: u32 = 256;
 pub const SPEC_CUBEMAP_MIP_LEVELS: u8 = 6;
@@ -49,7 +50,7 @@ pub type Backend = rendy::empty::Backend;
 fn main() {
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Warn)
-        .filter_module("rendy_pbr", log::LevelFilter::Trace)
+        .filter_module("rendy_pbr", log::LevelFilter::Info)
         .init();
 
     match run() {
@@ -175,7 +176,8 @@ fn run() -> Result<(), failure::Error> {
         node::env_preprocess::faces_to_cubemap::FacesToCubemap::<Backend>::builder(
             vec![env_cube_faces_img],
             "environment",
-            1,
+            node::env_preprocess::faces_to_cubemap::CopyMips::GenerateMips,
+            // node::env_preprocess::faces_to_cubemap::CopyMips::CopyMips(1),
         )
         .with_dependency(equirect_to_faces_pass),
     );
@@ -201,7 +203,7 @@ fn run() -> Result<(), failure::Error> {
         node::env_preprocess::faces_to_cubemap::FacesToCubemap::<Backend>::builder(
             vec![irradiance_cube_faces_img],
             "irradiance",
-            1,
+            node::env_preprocess::faces_to_cubemap::CopyMips::CopyMips(1),
         )
         .with_dependency(env_to_irradiance_faces_pass),
     );
@@ -238,7 +240,7 @@ fn run() -> Result<(), failure::Error> {
     let mut builder = node::env_preprocess::faces_to_cubemap::FacesToCubemap::<Backend>::builder(
         spec_cube_faces_images.clone(),
         "specular",
-        SPEC_CUBEMAP_MIP_LEVELS,
+        node::env_preprocess::faces_to_cubemap::CopyMips::CopyMips(SPEC_CUBEMAP_MIP_LEVELS),
     );
 
     for pass in env_to_spec_faces_passes {
@@ -297,6 +299,9 @@ fn run() -> Result<(), failure::Error> {
             6,
             1,
         ))
+        .with_mip_levels(rendy::texture::MipLevels::RawLevels(
+            std::num::NonZeroU8::new(ENV_CUBEMAP_MIP_LEVELS).unwrap(),
+        ))
         .with_view_kind(rendy::resource::ViewKind::Cube)
         .with_data_width(ENV_CUBEMAP_RES)
         .with_data_height(ENV_CUBEMAP_RES)
@@ -350,7 +355,9 @@ fn run() -> Result<(), failure::Error> {
             6,
             1,
         ))
-        .with_mip_levels(rendy::texture::MipLevels::RawLevels(std::num::NonZeroU8::new(SPEC_CUBEMAP_MIP_LEVELS))
+        .with_mip_levels(rendy::texture::MipLevels::RawLevels(
+            std::num::NonZeroU8::new(SPEC_CUBEMAP_MIP_LEVELS).unwrap(),
+        ))
         .with_view_kind(rendy::resource::ViewKind::Cube)
         .with_data_width(SPEC_CUBEMAP_RES)
         .with_data_height(SPEC_CUBEMAP_RES)
@@ -644,6 +651,10 @@ fn run() -> Result<(), failure::Error> {
     }
 
     pbr_graph.dispose(&mut factory, &mut world);
+    // world must be dropped before factory so that resources held in
+    // material/mesh/primitive storages can be sent back to the factory for
+    // disposal before it is destroyed.
+    std::mem::drop(world);
     Ok(())
 }
 

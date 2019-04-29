@@ -26,6 +26,7 @@ pub type GltfFileIndex = usize;
 pub struct SceneConfig {
     pub environment_map: String,
     pub environment_filter_quality: Quality,
+    pub mipmap_model_textures: bool,
     pub gltf_sources: Vec<(BasePath, Filename)>,
     pub entities: Vec<SceneEntity>,
 }
@@ -35,7 +36,7 @@ pub struct SceneConfig {
 pub enum Quality {
     Low,
     Medium,
-    High
+    High,
 }
 
 /// The index of an entity in the SceneEntity list of the scene config
@@ -171,6 +172,7 @@ impl SceneConfig {
                 asset::load_gltf_mesh(
                     &mesh,
                     256,
+                    self.mipmap_model_textures,
                     base_path,
                     &gltf_buffers,
                     base_mesh_index,

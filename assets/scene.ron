@@ -10,13 +10,15 @@ SceneConfig(
         ("assets/gltf/SciFiHelmet", "SciFiHelmet.gltf"),
         ("assets/gltf/Corset", "Corset.gltf"),
         ("assets/gltf/FlightHelmet", "FlightHelmet.gltf"),
+        ("assets/gltf/ElementalSword", "scene.gltf"),
     ],
+    mipmap_model_textures: false,
     entities: [
         // SciFi Helmet
         SceneEntity(
             transform: Manual((
                 scale: 0.15,
-                // euler_rotation: (0.0, 3.14159, 0.0),
+                translation: (0.0, -0.2, 0.0),
             )),
             mesh: Some(Mesh(Index(0, 0))),
             parent: None,
@@ -63,6 +65,15 @@ SceneConfig(
             transform: Gltf(Index(2, 4)),
             mesh: Some(Node(Index(2, 4))),
             parent: Some(2),
+        ),
+        // Elemental Sword
+        SceneEntity(
+            transform: Manual((
+                scale: 0.0075,
+                euler_rotation: (0.25, 1.57, 0.0),
+                translation: (-0.6, 0.45, 0.0),
+            )),
+            mesh: Some(Mesh(Index(3, 0))),
         ),
         // Camera
         SceneEntity(
