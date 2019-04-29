@@ -20,6 +20,7 @@ other helpers. It is a testbed for `rendy` and Amethyst; much or all of what is 
 -   [ ] Postprocess color correction
 -   [ ] Directional lights
 -   [ ] Shadow mapping
+-   [ ] (Maybe) Vertex skinning/animation
 
 # Scene Description
 
@@ -68,5 +69,7 @@ tracker!
 ![](screenshots/ibl2.png)
 ![](screenshots/ibl3.png)
 ![](screenshots/scene1.png)
+![](screenshots/sword1.png)
+![](screenshots/sword2.png)
 ![](screenshots/helmet3.png)
 ![](screenshots/helmet4.png)

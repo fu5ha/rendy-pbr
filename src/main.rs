@@ -177,7 +177,6 @@ fn run() -> Result<(), failure::Error> {
             vec![env_cube_faces_img],
             "environment",
             node::env_preprocess::faces_to_cubemap::CopyMips::GenerateMips,
-            // node::env_preprocess::faces_to_cubemap::CopyMips::CopyMips(1),
         )
         .with_dependency(equirect_to_faces_pass),
     );
