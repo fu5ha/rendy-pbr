@@ -3,13 +3,21 @@ use rendy::{
     factory::Factory,
     graph::{render::*, GraphContext, NodeBuffer, NodeImage},
     hal::{pso::DescriptorPool, Device},
-    resource::{DescriptorSetLayout, Handle},
+    memory::MemoryUsageValue,
+    resource::{Buffer, BufferInfo, DescriptorSetLayout, Escape, Handle},
     shader::{PathBufShaderInfo, Shader, ShaderKind, SourceLanguage},
 };
 
 use rendy::hal;
 
 use crate::node::env_preprocess::Aux;
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct UniformArgs {
+    roughness: f32,
+    resolution: f32,
+}
 
 lazy_static::lazy_static! {
     static ref VERTEX: PathBufShaderInfo = PathBufShaderInfo::new(
@@ -20,11 +28,41 @@ lazy_static::lazy_static! {
     );
 
     static ref FRAGMENT: PathBufShaderInfo = PathBufShaderInfo::new(
-        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/equirectangular_to_cube_faces.frag"),
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/env_to_specular.frag"),
         ShaderKind::Fragment,
         SourceLanguage::GLSL,
         "main",
     );
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Settings {
+    align: u64,
+}
+
+impl<B: hal::Backend> From<&Aux<B>> for Settings {
+    fn from(aux: &Aux<B>) -> Self {
+        Self::from_aux(aux)
+    }
+}
+
+impl<B: hal::Backend> From<&mut Aux<B>> for Settings {
+    fn from(aux: &mut Aux<B>) -> Self {
+        Self::from_aux(aux)
+    }
+}
+
+impl Settings {
+    const UNIFORM_SIZE: u64 = std::mem::size_of::<UniformArgs>() as u64;
+
+    fn from_aux<B: hal::Backend>(aux: &Aux<B>) -> Self {
+        Settings { align: aux.align }
+    }
+
+    #[inline]
+    fn buffer_frame_size(&self) -> u64 {
+        ((Self::UNIFORM_SIZE - 1) / self.align + 1) * self.align
+    }
 }
 
 #[derive(Debug, Default)]
@@ -33,6 +71,8 @@ pub struct PipelineDesc;
 pub struct Pipeline<B: hal::Backend> {
     set: B::DescriptorSet,
     pool: B::DescriptorPool,
+    #[allow(dead_code)]
+    buffer: Escape<Buffer<B>>,
 }
 
 impl<B: hal::Backend> std::fmt::Debug for Pipeline<B> {
@@ -59,7 +99,7 @@ where
         &self,
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
-        _aux: &Aux<B>,
+        aux: &Aux<B>,
     ) -> hal::pso::GraphicsShaderSet<'a, B> {
         storage.clear();
 
@@ -78,7 +118,10 @@ where
             fragment: Some(hal::pso::EntryPoint {
                 entry: "main",
                 module: &storage[1],
-                specialization: hal::pso::Specialization::default(),
+                specialization: hal::pso::Specialization {
+                    constants: &[hal::pso::SpecializationConstant { id: 0, range: 0..4 }],
+                    data: unsafe { std::mem::transmute::<&u32, &[u8; 4]>(&aux.spec_samples) },
+                },
             }),
             hull: None,
             domain: None,
@@ -92,13 +135,20 @@ where
                 bindings: vec![
                     hal::pso::DescriptorSetLayoutBinding {
                         binding: 0,
+                        ty: hal::pso::DescriptorType::UniformBuffer,
+                        count: 1,
+                        stage_flags: hal::pso::ShaderStageFlags::GRAPHICS,
+                        immutable_samplers: false,
+                    },
+                    hal::pso::DescriptorSetLayoutBinding {
+                        binding: 1,
                         ty: hal::pso::DescriptorType::Sampler,
                         count: 1,
                         stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
                         immutable_samplers: false,
                     },
                     hal::pso::DescriptorSetLayoutBinding {
-                        binding: 1,
+                        binding: 2,
                         ty: hal::pso::DescriptorType::SampledImage,
                         count: 1,
                         stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
@@ -129,6 +179,10 @@ where
                 1,
                 vec![
                     hal::pso::DescriptorRangeDesc {
+                        ty: hal::pso::DescriptorType::UniformBuffer,
+                        count: 1,
+                    },
+                    hal::pso::DescriptorRangeDesc {
                         ty: hal::pso::DescriptorType::Sampler,
                         count: 1,
                     },
@@ -140,6 +194,16 @@ where
             )?
         };
 
+        let settings: Settings = aux.into();
+
+        let mut buffer = factory.create_buffer(
+            BufferInfo {
+                size: settings.buffer_frame_size(),
+                usage: hal::buffer::Usage::UNIFORM,
+            },
+            MemoryUsageValue::Dynamic,
+        )?;
+
         let set = unsafe {
             let set = pool.allocate_set(&set_layouts[0].raw())?;
             factory.write_descriptor_sets(vec![
@@ -147,16 +211,25 @@ where
                     set: &set,
                     binding: 0,
                     array_offset: 0,
-                    descriptors: Some(hal::pso::Descriptor::Sampler(
-                        aux.equirectangular_texture.sampler().raw(),
+                    descriptors: Some(hal::pso::Descriptor::Buffer(
+                        buffer.raw(),
+                        Some(0)..Some(Settings::UNIFORM_SIZE),
                     )),
                 },
                 hal::pso::DescriptorSetWrite {
                     set: &set,
                     binding: 1,
                     array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::Sampler(
+                        aux.environment_cubemap.as_ref().unwrap().sampler().raw(),
+                    )),
+                },
+                hal::pso::DescriptorSetWrite {
+                    set: &set,
+                    binding: 2,
+                    array_offset: 0,
                     descriptors: Some(hal::pso::Descriptor::Image(
-                        aux.equirectangular_texture.view().raw(),
+                        aux.environment_cubemap.as_ref().unwrap().view().raw(),
                         hal::image::Layout::ShaderReadOnlyOptimal,
                     )),
                 },
@@ -164,7 +237,22 @@ where
             set
         };
 
-        Ok(Pipeline { set, pool })
+        unsafe {
+            factory.upload_visible_buffer(
+                &mut buffer,
+                0,
+                &[UniformArgs {
+                    roughness: aux
+                        .mip_level
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        as f32
+                        / (crate::SPEC_CUBEMAP_MIP_LEVELS - 1) as f32,
+                    resolution: crate::ENV_CUBEMAP_RES as f32,
+                }],
+            )?
+        };
+
+        Ok(Pipeline { set, pool, buffer })
     }
 }
 

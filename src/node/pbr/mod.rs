@@ -1,6 +1,8 @@
 use crate::components;
 use derivative::Derivative;
+use rendy::hal;
 
+pub mod environment_map;
 pub mod mesh;
 pub mod tonemap;
 
@@ -15,11 +17,7 @@ pub struct CameraArgs {
 impl From<(&components::Camera, &components::GlobalTransform)> for CameraArgs {
     fn from((cam, trans): (&components::Camera, &components::GlobalTransform)) -> Self {
         CameraArgs {
-            proj: {
-                let mut proj = cam.proj.to_homogeneous();
-                proj[(1, 1)] *= -1.0;
-                proj
-            },
+            proj: cam.proj.to_homogeneous(),
             view: trans.0.try_inverse().unwrap(),
             camera_pos: nalgebra::Point3::from(trans.0.column(3).xyz()),
         }
@@ -37,9 +35,20 @@ pub struct LightData {
     pub _pad: f32,
 }
 
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
+pub struct EnvironmentStorage<B: hal::Backend> {
+    pub env_cube: Option<rendy::texture::Texture<B>>,
+    pub irradiance_cube: Option<rendy::texture::Texture<B>>,
+    pub spec_cube: Option<rendy::texture::Texture<B>>,
+    pub spec_brdf_map: Option<rendy::texture::Texture<B>>,
+}
+
 #[derive(Default)]
 pub struct Aux {
     pub frames: usize,
     pub align: u64,
     pub tonemapper_args: tonemap::TonemapperArgs,
+    pub cube_display: environment_map::CubeDisplay,
+    pub cube_roughness: f32,
 }

@@ -8,7 +8,7 @@ layout(location = 3) in vec2 a_uv;
 // vec4[4] is used instead of mat4 due to spirv-cross bug for dx12 backend
 layout(location = 4) in vec4 model[4]; // per-instance.
 
-layout(std140, set = 0, binding = 0) uniform Args {
+layout(std140, set = 1, binding = 0) uniform Args {
     mat4 proj;
     mat4 view;
     vec3 camera_pos;

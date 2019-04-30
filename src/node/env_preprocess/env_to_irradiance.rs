@@ -20,7 +20,7 @@ lazy_static::lazy_static! {
     );
 
     static ref FRAGMENT: PathBufShaderInfo = PathBufShaderInfo::new(
-        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/equirectangular_to_cube_faces.frag"),
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/env_to_irradiance.frag"),
         ShaderKind::Fragment,
         SourceLanguage::GLSL,
         "main",
@@ -59,7 +59,7 @@ where
         &self,
         storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
-        _aux: &Aux<B>,
+        aux: &Aux<B>,
     ) -> hal::pso::GraphicsShaderSet<'a, B> {
         storage.clear();
 
@@ -78,7 +78,12 @@ where
             fragment: Some(hal::pso::EntryPoint {
                 entry: "main",
                 module: &storage[1],
-                specialization: hal::pso::Specialization::default(),
+                specialization: hal::pso::Specialization {
+                    constants: &[hal::pso::SpecializationConstant { id: 0, range: 0..4 }],
+                    data: unsafe {
+                        std::mem::transmute::<&u32, &[u8; 4]>(&aux.irradiance_theta_samples)
+                    },
+                },
             }),
             hull: None,
             domain: None,
@@ -148,7 +153,7 @@ where
                     binding: 0,
                     array_offset: 0,
                     descriptors: Some(hal::pso::Descriptor::Sampler(
-                        aux.equirectangular_texture.sampler().raw(),
+                        aux.environment_cubemap.as_ref().unwrap().sampler().raw(),
                     )),
                 },
                 hal::pso::DescriptorSetWrite {
@@ -156,7 +161,7 @@ where
                     binding: 1,
                     array_offset: 0,
                     descriptors: Some(hal::pso::Descriptor::Image(
-                        aux.equirectangular_texture.view().raw(),
+                        aux.environment_cubemap.as_ref().unwrap().view().raw(),
                         hal::image::Layout::ShaderReadOnlyOptimal,
                     )),
                 },

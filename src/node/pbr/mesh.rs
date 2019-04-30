@@ -9,7 +9,7 @@ use rendy::{
         Buffer, BufferInfo, DescriptorSetLayout, Escape, Filter, Handle, Sampler, SamplerInfo,
         WrapMode,
     },
-    shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
+    shader::{PathBufShaderInfo, Shader, ShaderKind, SourceLanguage},
 };
 
 use std::mem::size_of;
@@ -23,15 +23,15 @@ use crate::{
 };
 
 lazy_static::lazy_static! {
-    static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/pbr.vert"),
+    static ref VERTEX: PathBufShaderInfo = PathBufShaderInfo::new(
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/pbr.vert"),
         ShaderKind::Vertex,
         SourceLanguage::GLSL,
         "main",
     );
 
-    static ref FRAGMENT: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/pbr.frag"),
+    static ref FRAGMENT: PathBufShaderInfo = PathBufShaderInfo::new(
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/pbr.frag"),
         ShaderKind::Fragment,
         SourceLanguage::GLSL,
         "main",
@@ -55,7 +55,8 @@ pub struct Pipeline<B: hal::Backend> {
     uniform_indirect_buffer: Escape<Buffer<B>>,
     transform_buffer: Escape<Buffer<B>>,
     texture_sampler: Escape<Sampler<B>>,
-    frame_sets: Vec<B::DescriptorSet>,
+    static_set: B::DescriptorSet,
+    ubo_sets: Vec<B::DescriptorSet>,
     mat_sets: Vec<B::DescriptorSet>,
     settings: Settings,
 }
@@ -154,28 +155,56 @@ where
     type Pipeline = Pipeline<B>;
 
     fn layout(&self) -> Layout {
-        let all_layout = SetLayout {
+        // Layout to update only once at the beginning
+        let static_layout = SetLayout {
             bindings: vec![
-                hal::pso::DescriptorSetLayoutBinding {
-                    binding: 0,
-                    ty: hal::pso::DescriptorType::UniformBuffer,
-                    count: 1,
-                    stage_flags: hal::pso::ShaderStageFlags::GRAPHICS,
-                    immutable_samplers: false,
-                },
                 // Texture maps sampler
                 hal::pso::DescriptorSetLayoutBinding {
-                    binding: 1,
+                    binding: 0,
                     ty: hal::pso::DescriptorType::Sampler,
+                    count: 1,
+                    stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                    immutable_samplers: false,
+                },
+                // specular cube map
+                hal::pso::DescriptorSetLayoutBinding {
+                    binding: 1,
+                    ty: hal::pso::DescriptorType::SampledImage,
+                    count: 1,
+                    stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                    immutable_samplers: false,
+                },
+                // irradiance cube map
+                hal::pso::DescriptorSetLayoutBinding {
+                    binding: 2,
+                    ty: hal::pso::DescriptorType::SampledImage,
+                    count: 1,
+                    stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+                    immutable_samplers: false,
+                },
+                // specular brdf integration map
+                hal::pso::DescriptorSetLayoutBinding {
+                    binding: 3,
+                    ty: hal::pso::DescriptorType::SampledImage,
                     count: 1,
                     stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
                     immutable_samplers: false,
                 },
             ],
         };
+        // Layout to update once per frame
+        let ubo_layout = SetLayout {
+            bindings: vec![hal::pso::DescriptorSetLayoutBinding {
+                binding: 0,
+                ty: hal::pso::DescriptorType::UniformBuffer,
+                count: 1,
+                stage_flags: hal::pso::ShaderStageFlags::GRAPHICS,
+                immutable_samplers: false,
+            }],
+        };
         // SampledImage for each texture map, can reuse same sampler
         let mut bindings = Vec::with_capacity(4);
-        for i in 0..4 {
+        for i in 0..5 {
             bindings.push(hal::pso::DescriptorSetLayoutBinding {
                 binding: i,
                 ty: hal::pso::DescriptorType::SampledImage,
@@ -184,9 +213,16 @@ where
                 immutable_samplers: false,
             });
         }
+        bindings.push(hal::pso::DescriptorSetLayoutBinding {
+            binding: 5,
+            ty: hal::pso::DescriptorType::UniformBuffer,
+            count: 1,
+            stage_flags: hal::pso::ShaderStageFlags::FRAGMENT,
+            immutable_samplers: false,
+        });
         let material_layout = SetLayout { bindings };
         Layout {
-            sets: vec![all_layout, material_layout],
+            sets: vec![static_layout, ubo_layout, material_layout],
             push_constants: Vec::new(),
         }
     }
@@ -247,28 +283,31 @@ where
     ) -> Result<Pipeline<B>, failure::Error> {
         assert!(buffers.is_empty());
         assert!(images.is_empty());
-        assert_eq!(set_layouts.len(), 2);
+        assert_eq!(set_layouts.len(), 3);
 
         let aux = world.read_resource::<Aux>();
         let frames = aux.frames;
         let material_storage = world.read_resource::<asset::MaterialStorage<B>>();
+        let env_storage = world.read_resource::<super::EnvironmentStorage<B>>();
 
         let num_mats = material_storage.0.len();
+        let num_env_maps = 3;
         let mut descriptor_pool = unsafe {
             factory.create_descriptor_pool(
-                frames + num_mats,
+                // one per material, one per frame for ubo, and one for static set
+                frames + num_mats + 1,
                 vec![
                     hal::pso::DescriptorRangeDesc {
                         ty: hal::pso::DescriptorType::UniformBuffer,
-                        count: frames,
+                        count: frames + num_mats,
                     },
                     hal::pso::DescriptorRangeDesc {
                         ty: hal::pso::DescriptorType::Sampler,
-                        count: frames,
+                        count: 1,
                     },
                     hal::pso::DescriptorRangeDesc {
                         ty: hal::pso::DescriptorType::SampledImage,
-                        count: num_mats * 4,
+                        count: (num_mats * 5) + (num_env_maps),
                     },
                 ],
             )?
@@ -294,31 +333,61 @@ where
         let texture_sampler =
             factory.create_sampler(SamplerInfo::new(Filter::Linear, WrapMode::Clamp))?;
 
-        let mut frame_sets = Vec::with_capacity(frames);
+        let static_set = unsafe {
+            let set = descriptor_pool.allocate_set(&set_layouts[0].raw())?;
+            factory.write_descriptor_sets(vec![
+                hal::pso::DescriptorSetWrite {
+                    set: &set,
+                    binding: 0,
+                    array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::Sampler(texture_sampler.raw())),
+                },
+                hal::pso::DescriptorSetWrite {
+                    set: &set,
+                    binding: 1,
+                    array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::Image(
+                        env_storage.spec_cube.as_ref().unwrap().view().raw(),
+                        hal::image::Layout::ShaderReadOnlyOptimal,
+                    )),
+                },
+                hal::pso::DescriptorSetWrite {
+                    set: &set,
+                    binding: 2,
+                    array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::Image(
+                        env_storage.irradiance_cube.as_ref().unwrap().view().raw(),
+                        hal::image::Layout::ShaderReadOnlyOptimal,
+                    )),
+                },
+                hal::pso::DescriptorSetWrite {
+                    set: &set,
+                    binding: 3,
+                    array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::Image(
+                        env_storage.spec_brdf_map.as_ref().unwrap().view().raw(),
+                        hal::image::Layout::ShaderReadOnlyOptimal,
+                    )),
+                },
+            ]);
+            set
+        };
+
+        let mut ubo_sets = Vec::with_capacity(frames);
         for index in 0..frames {
             unsafe {
-                let set = descriptor_pool.allocate_set(&set_layouts[0].raw())?;
-                factory.write_descriptor_sets(vec![
-                    hal::pso::DescriptorSetWrite {
-                        set: &set,
-                        binding: 0,
-                        array_offset: 0,
-                        descriptors: Some(hal::pso::Descriptor::Buffer(
-                            uniform_indirect_buffer.raw(),
-                            Some(settings.uniform_offset(index as u64))
-                                ..Some(
-                                    settings.uniform_offset(index as u64) + Settings::UNIFORM_SIZE,
-                                ),
-                        )),
-                    },
-                    hal::pso::DescriptorSetWrite {
-                        set: &set,
-                        binding: 1,
-                        array_offset: 0,
-                        descriptors: Some(hal::pso::Descriptor::Sampler(texture_sampler.raw())),
-                    },
-                ]);
-                frame_sets.push(set);
+                let set = descriptor_pool.allocate_set(&set_layouts[1].raw())?;
+                factory.write_descriptor_sets(vec![hal::pso::DescriptorSetWrite {
+                    set: &set,
+                    binding: 0,
+                    array_offset: 0,
+                    descriptors: Some(hal::pso::Descriptor::Buffer(
+                        uniform_indirect_buffer.raw(),
+                        Some(settings.uniform_offset(index as u64))
+                            ..Some(settings.uniform_offset(index as u64) + Settings::UNIFORM_SIZE),
+                    )),
+                }]);
+                ubo_sets.push(set);
             }
         }
 
@@ -326,7 +395,7 @@ where
 
         for mat_data in material_storage.0.iter() {
             unsafe {
-                let set = descriptor_pool.allocate_set(&set_layouts[1].raw())?;
+                let set = descriptor_pool.allocate_set(&set_layouts[2].raw())?;
                 factory.write_descriptor_sets(vec![
                     hal::pso::DescriptorSetWrite {
                         set: &set,
@@ -364,6 +433,24 @@ where
                             hal::image::Layout::ShaderReadOnlyOptimal,
                         )),
                     },
+                    hal::pso::DescriptorSetWrite {
+                        set: &set,
+                        binding: 4,
+                        array_offset: 0,
+                        descriptors: Some(hal::pso::Descriptor::Image(
+                            mat_data.emissive.view().raw(),
+                            hal::image::Layout::ShaderReadOnlyOptimal,
+                        )),
+                    },
+                    hal::pso::DescriptorSetWrite {
+                        set: &set,
+                        binding: 5,
+                        array_offset: 0,
+                        descriptors: Some(hal::pso::Descriptor::Buffer(
+                            mat_data.emissive_factor_buffer.raw(),
+                            None..None,
+                        )),
+                    },
                 ]);
                 mat_sets.push(set);
             }
@@ -374,7 +461,8 @@ where
             uniform_indirect_buffer,
             transform_buffer,
             texture_sampler,
-            frame_sets,
+            static_set,
+            ubo_sets,
             mat_sets,
             settings,
         })
@@ -443,7 +531,6 @@ where
         };
 
         let instance_cache = world.read_resource::<systems::InstanceCache>();
-        // log::debug!("cache: {:?}", *instance_cache);
         let mesh_storage = world.read_resource::<asset::MeshStorage>();
         let primitive_storage = world.read_resource::<asset::PrimitiveStorage<B>>();
 
@@ -523,13 +610,13 @@ where
         encoder.bind_graphics_descriptor_sets(
             layout,
             0,
-            Some(&self.frame_sets[index]),
+            vec![&self.static_set, &self.ubo_sets[index]],
             std::iter::empty(),
         );
         let transforms_offset = self.settings.transforms_offset(index as u64);
         let indirect_offset = self.settings.indirect_offset(index as u64);
         for (mat_idx, set) in self.mat_sets.iter().enumerate() {
-            encoder.bind_graphics_descriptor_sets(layout, 1, Some(set), std::iter::empty());
+            encoder.bind_graphics_descriptor_sets(layout, 2, Some(set), std::iter::empty());
             for (prim_idx, primitive) in primitive_storage
                 .0
                 .iter()

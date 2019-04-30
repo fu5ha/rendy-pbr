@@ -4,22 +4,25 @@
 layout(location = 0) in vec3 f_pos;
 layout(location = 1) flat in int face_index;
 
-layout(set = 0, binding = 1) uniform sampler equirectangular_sampler;
-layout(set = 0, binding = 2) uniform texture2D equirectangular_texture;
+layout(set = 0, binding = 0) uniform sampler equirectangular_sampler;
+layout(set = 0, binding = 1) uniform texture2D equirectangular_texture;
 
-const vec2 invAtan = vec2(0.1591, 0.3183);
+// Converts from [-Pi, Pi] on X to [-0.5, 0.5], and [-Pi/2, Pi/2] on Y to [-0.5, 0.5]
+const vec2 normalize_spherical_coords = vec2(0.1591, 0.3183);
 vec2 SampleSphericalMap(vec3 v)
 {
-    vec2 uv = vec2(atan(v.z, v.x), asin(v.y));
-    uv *= invAtan;
+    vec2 uv = vec2(atan(v.x, v.z), asin(-v.y));
+    uv *= normalize_spherical_coords;
     uv += 0.5;
     return uv;
 }
 
-layout(location = 0) out vec4 color[6];
+layout(location = 0) out vec4 color;
 
 void main() {
-    vec2 uv = SampleSphericalMap(normalize(f_pos));
+    vec3 pos = f_pos;
+    vec2 uv = SampleSphericalMap(normalize(pos));
     vec3 col = texture(sampler2D(equirectangular_texture, equirectangular_sampler), uv).rgb;
-    color[face_index] = vec4(col, 1.0);
+    color = vec4(col, 1.0);
+    // color = vec4(pos * 0.5 + vec3(0.5), 1.0);
 }

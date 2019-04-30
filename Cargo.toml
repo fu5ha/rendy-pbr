@@ -16,10 +16,11 @@ metal = ["rendy/metal"]
 dx12 = ["rendy/dx12"]
 vulkan = ["rendy/vulkan"]
 empty = ["rendy/empty"]
+rd = ["renderdoc"]
 
 [dependencies]
 genmesh = "0.6"
-nalgebra = { version = "0.17" }
+nalgebra = "0.17"
 env_logger = "0.5"
 failure = "0.1"
 lazy_static = "1.0"
@@ -35,14 +36,18 @@ hibitset = "0.5"
 ron = "0.5"
 serde = "1.0"
 
+[dependencies.renderdoc]
+version = "0.4"
+optional = true
+
 [dependencies.gltf]
-git = "https://github.com/gltf-rs/gltf"
-rev = "acf33a93e82aea16fd36e81f9a667d5b2ab064a1"
-# path = "../gltf"
+# git = "https://github.com/gltf-rs/gltf"
+# rev = "acf33a93e82aea16fd36e81f9a667d5b2ab064a1"
+path = "../gltf"
 
 [dependencies.rendy]
 optional = true
-# path = "../rendy/rendy"
+path = "../rendy/rendy"
 features = ["texture-image"]
-git = "https://github.com/termhn/rendy"
-rev = "6c2180a14c78850e36b683407d44df56fc6b0bff"
+# git = "https://github.com/termhn/rendy"
+# rev = "76de025e1a63754ab577ebf3a94eb0eda47b3d48"

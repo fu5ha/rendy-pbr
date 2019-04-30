@@ -7,7 +7,7 @@ use rendy::{
         Buffer, BufferInfo, DescriptorSetLayout, Escape, Filter, Handle, ImageView, ImageViewInfo,
         Sampler, SamplerInfo, ViewKind, WrapMode,
     },
-    shader::{Shader, ShaderKind, SourceLanguage, StaticShaderInfo},
+    shader::{PathBufShaderInfo, Shader, ShaderKind, SourceLanguage},
 };
 
 use rendy::hal;
@@ -17,15 +17,15 @@ use std::mem::size_of;
 use crate::node::pbr::Aux;
 
 lazy_static::lazy_static! {
-    static ref VERTEX: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/tonemap.vert"),
+    static ref VERTEX: PathBufShaderInfo = PathBufShaderInfo::new(
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/fullscreen_triangle.vert"),
         ShaderKind::Vertex,
         SourceLanguage::GLSL,
         "main",
     );
 
-    static ref FRAGMENT: StaticShaderInfo = StaticShaderInfo::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/assets/shaders/tonemap.frag"),
+    static ref FRAGMENT: PathBufShaderInfo = PathBufShaderInfo::new(
+        std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/tonemap.frag"),
         ShaderKind::Fragment,
         SourceLanguage::GLSL,
         "main",

@@ -24,8 +24,19 @@ pub type GltfFileIndex = usize;
 /// a list of entities in the scene.
 #[derive(Debug, Deserialize)]
 pub struct SceneConfig {
+    pub environment_map: String,
+    pub environment_filter_quality: Quality,
+    pub mipmap_model_textures: bool,
     pub gltf_sources: Vec<(BasePath, Filename)>,
     pub entities: Vec<SceneEntity>,
+}
+
+/// Determines the quality of some part of the render
+#[derive(Debug, Deserialize)]
+pub enum Quality {
+    Low,
+    Medium,
+    High,
 }
 
 /// The index of an entity in the SceneEntity list of the scene config
@@ -105,7 +116,7 @@ pub enum GltfMesh {
 
 impl SceneConfig {
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, failure::Error> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path.as_ref());
+        let path = Path::new(&crate::application_root_dir()).join(path.as_ref());
         let file = File::open(path).unwrap();
         let reader = std::io::BufReader::new(file);
         ron::de::from_reader(reader).map_err(From::from)
@@ -137,7 +148,7 @@ impl SceneConfig {
             .gltf_sources
             .drain(..)
             .map(|path| {
-                let base_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path.0);
+                let base_path = Path::new(&crate::application_root_dir()).join(path.0);
                 let file = File::open(base_path.join(path.1)).unwrap();
                 let reader = std::io::BufReader::new(file);
                 (gltf::Gltf::from_reader(reader).unwrap(), base_path.clone())
@@ -161,6 +172,7 @@ impl SceneConfig {
                 asset::load_gltf_mesh(
                     &mesh,
                     256,
+                    self.mipmap_model_textures,
                     base_path,
                     &gltf_buffers,
                     base_mesh_index,

@@ -99,7 +99,6 @@ impl<'a> System<'a> for TransformSystem {
         {
             self.global_modified.add(entity.id());
             global.0 = local.0.to_homogeneous();
-            // log::debug!("Baked local transform: {} to global: {}", local.0, global.0);
             debug_assert!(
                 global.is_finite(),
                 format!("Entity {:?} had a non-finite `Transform`", entity)
@@ -122,11 +121,6 @@ impl<'a> System<'a> for TransformSystem {
                     if let Some(global) = globals.get_mut(*entity) {
                         self.global_modified.add(entity.id());
                         global.0 = combined_transform;
-                        // log::debug!(
-                        //     "Baked local transform (WTH PARENT): {} to global: {}",
-                        //     local.0,
-                        //     global.0
-                        // );
                     }
                 }
             }
