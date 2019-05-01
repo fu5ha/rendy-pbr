@@ -42,12 +42,12 @@ optional = true
 
 [dependencies.gltf]
 # git = "https://github.com/gltf-rs/gltf"
-# rev = "acf33a93e82aea16fd36e81f9a667d5b2ab064a1"
-path = "../gltf"
+rev = "acf33a93e82aea16fd36e81f9a667d5b2ab064a1"
+# path = "../gltf"
 
 [dependencies.rendy]
 optional = true
-path = "../rendy/rendy"
+# path = "../rendy/rendy"
 features = ["texture-image"]
-# git = "https://github.com/termhn/rendy"
-# rev = "76de025e1a63754ab577ebf3a94eb0eda47b3d48"
+git = "https://github.com/termhn/rendy"
+rev = "a23632f4e2c96f5ff724c1021676129a79b6f192"
