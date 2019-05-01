@@ -41,7 +41,7 @@ version = "0.4"
 optional = true
 
 [dependencies.gltf]
-# git = "https://github.com/gltf-rs/gltf"
+git = "https://github.com/gltf-rs/gltf"
 rev = "acf33a93e82aea16fd36e81f9a667d5b2ab064a1"
 # path = "../gltf"
 
