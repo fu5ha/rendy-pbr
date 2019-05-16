@@ -11,7 +11,7 @@ use rendy::{
     memory::MemoryUsageValue,
     mesh::{AsVertex, Mesh, Position},
     resource::{Buffer, BufferInfo, DescriptorSetLayout, Escape, Handle},
-    shader::{PathBufShaderInfo, Shader, ShaderKind, SourceLanguage},
+    shader::{PathBufShaderInfo, ShaderKind, SourceLanguage},
 };
 
 use rendy::hal;
@@ -39,6 +39,10 @@ lazy_static::lazy_static! {
         SourceLanguage::GLSL,
         "main",
     );
+
+    static ref SHADERS: rendy::shader::ShaderSetBuilder = rendy::shader::ShaderSetBuilder::default()
+        .with_vertex(&*VERTEX).unwrap()
+        .with_fragment(&*FRAGMENT).unwrap();
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -101,7 +105,7 @@ where
         hal::pso::ElemStride,
         hal::pso::InstanceRate,
     )> {
-        vec![Position::VERTEX.gfx_vertex_input_desc(0)]
+        vec![Position::vertex().gfx_vertex_input_desc(0)]
     }
 
     fn colors(&self) -> Vec<hal::pso::ColorBlendDesc> {
@@ -112,35 +116,12 @@ where
         None
     }
 
-    fn load_shader_set<'a>(
+    fn load_shader_set(
         &self,
-        storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
         _aux: &Aux<B>,
-    ) -> hal::pso::GraphicsShaderSet<'a, B> {
-        storage.clear();
-
-        log::trace!("Load shader module '{:#?}'", *VERTEX);
-        storage.push(unsafe { VERTEX.module(factory).unwrap() });
-
-        log::trace!("Load shader module '{:#?}'", *FRAGMENT);
-        storage.push(unsafe { FRAGMENT.module(factory).unwrap() });
-
-        hal::pso::GraphicsShaderSet {
-            vertex: hal::pso::EntryPoint {
-                entry: "main",
-                module: &storage[0],
-                specialization: hal::pso::Specialization::default(),
-            },
-            fragment: Some(hal::pso::EntryPoint {
-                entry: "main",
-                module: &storage[1],
-                specialization: hal::pso::Specialization::default(),
-            }),
-            hull: None,
-            domain: None,
-            geometry: None,
-        }
+    ) -> rendy::shader::ShaderSet<B> {
+        SHADERS.build(factory, Default::default()).unwrap()
     }
 
     fn layout(&self) -> Layout {
@@ -325,7 +306,10 @@ where
         _index: usize,
         _aux: &Aux<B>,
     ) {
-        assert!(self.cube.bind(&[Position::VERTEX], &mut encoder).is_ok());
+        assert!(self
+            .cube
+            .bind(0, &[Position::vertex()], &mut encoder)
+            .is_ok());
         encoder.bind_graphics_descriptor_sets(layout, 0, Some(&self.set), std::iter::empty());
         encoder.draw(0..36, 0..6);
     }

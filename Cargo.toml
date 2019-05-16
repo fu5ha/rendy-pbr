@@ -50,4 +50,4 @@ optional = true
 # path = "../rendy/rendy"
 features = ["texture-image"]
 git = "https://github.com/termhn/rendy"
-rev = "a23632f4e2c96f5ff724c1021676129a79b6f192"
+branch = "spec-constants"

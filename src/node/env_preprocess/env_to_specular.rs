@@ -5,7 +5,7 @@ use rendy::{
     hal::{pso::DescriptorPool, Device},
     memory::MemoryUsageValue,
     resource::{Buffer, BufferInfo, DescriptorSetLayout, Escape, Handle},
-    shader::{PathBufShaderInfo, Shader, ShaderKind, SourceLanguage},
+    shader::{PathBufShaderInfo, ShaderKind, SourceLanguage},
 };
 
 use rendy::hal;
@@ -33,6 +33,10 @@ lazy_static::lazy_static! {
         SourceLanguage::GLSL,
         "main",
     );
+
+    static ref SHADERS: rendy::shader::ShaderSetBuilder = rendy::shader::ShaderSetBuilder::default()
+        .with_vertex(&*VERTEX).unwrap()
+        .with_fragment(&*FRAGMENT).unwrap();
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -95,38 +99,17 @@ where
         None
     }
 
-    fn load_shader_set<'a>(
+    fn load_shader_set(
         &self,
-        storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
         aux: &Aux<B>,
-    ) -> hal::pso::GraphicsShaderSet<'a, B> {
-        storage.clear();
-
-        log::trace!("Load shader module '{:#?}'", *VERTEX);
-        storage.push(unsafe { VERTEX.module(factory).unwrap() });
-
-        log::trace!("Load shader module '{:#?}'", *FRAGMENT);
-        storage.push(unsafe { FRAGMENT.module(factory).unwrap() });
-
-        hal::pso::GraphicsShaderSet {
-            vertex: hal::pso::EntryPoint {
-                entry: "main",
-                module: &storage[0],
-                specialization: hal::pso::Specialization::default(),
-            },
-            fragment: Some(hal::pso::EntryPoint {
-                entry: "main",
-                module: &storage[1],
-                specialization: hal::pso::Specialization {
-                    constants: &[hal::pso::SpecializationConstant { id: 0, range: 0..4 }],
-                    data: unsafe { std::mem::transmute::<&u32, &[u8; 4]>(&aux.spec_samples) },
-                },
-            }),
-            hull: None,
-            domain: None,
-            geometry: None,
-        }
+    ) -> rendy::shader::ShaderSet<B> {
+        let mut spec_constants = rendy::shader::SpecConstantSet::default();
+        spec_constants.fragment = Some(hal::pso::Specialization {
+            constants: &[hal::pso::SpecializationConstant { id: 0, range: 0..4 }],
+            data: unsafe { std::mem::transmute::<&u32, &[u8; 4]>(&aux.spec_samples) },
+        });
+        SHADERS.build(factory, spec_constants).unwrap()
     }
 
     fn layout(&self) -> Layout {

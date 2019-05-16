@@ -3,7 +3,7 @@ use rendy::{
     factory::Factory,
     graph::{render::*, GraphContext, NodeBuffer, NodeImage},
     resource::{DescriptorSetLayout, Handle},
-    shader::{PathBufShaderInfo, Shader, ShaderKind, SourceLanguage},
+    shader::{PathBufShaderInfo, ShaderKind, SourceLanguage},
 };
 
 use rendy::hal;
@@ -24,6 +24,10 @@ lazy_static::lazy_static! {
         SourceLanguage::GLSL,
         "main",
     );
+
+    static ref SHADERS: rendy::shader::ShaderSetBuilder = rendy::shader::ShaderSetBuilder::default()
+        .with_vertex(&*VERTEX).unwrap()
+        .with_fragment(&*FRAGMENT).unwrap();
 }
 
 #[derive(Debug, Default)]
@@ -57,35 +61,12 @@ where
         None
     }
 
-    fn load_shader_set<'a>(
+    fn load_shader_set(
         &self,
-        storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
         _aux: &Aux<B>,
-    ) -> hal::pso::GraphicsShaderSet<'a, B> {
-        storage.clear();
-
-        log::trace!("Load shader module '{:#?}'", *VERTEX);
-        storage.push(unsafe { VERTEX.module(factory).unwrap() });
-
-        log::trace!("Load shader module '{:#?}'", *FRAGMENT);
-        storage.push(unsafe { FRAGMENT.module(factory).unwrap() });
-
-        hal::pso::GraphicsShaderSet {
-            vertex: hal::pso::EntryPoint {
-                entry: "main",
-                module: &storage[0],
-                specialization: hal::pso::Specialization::default(),
-            },
-            fragment: Some(hal::pso::EntryPoint {
-                entry: "main",
-                module: &storage[1],
-                specialization: hal::pso::Specialization::default(),
-            }),
-            hull: None,
-            domain: None,
-            geometry: None,
-        }
+    ) -> rendy::shader::ShaderSet<B> {
+        SHADERS.build(factory, Default::default()).unwrap()
     }
 
     fn layout(&self) -> Layout {

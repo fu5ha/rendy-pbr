@@ -4,12 +4,12 @@ use rendy::{
     graph::{render::*, GraphContext, NodeBuffer, NodeImage},
     hal::{pso::DescriptorPool, Device},
     memory::MemoryUsageValue,
-    mesh::{AsVertex, PosNormTangTex, Transform},
+    mesh::{AsVertex, Model, PosNormTangTex},
     resource::{
         Buffer, BufferInfo, DescriptorSetLayout, Escape, Filter, Handle, Sampler, SamplerInfo,
         WrapMode,
     },
-    shader::{PathBufShaderInfo, Shader, ShaderKind, SourceLanguage},
+    shader::{PathBufShaderInfo, ShaderKind, SourceLanguage},
 };
 
 use std::mem::size_of;
@@ -36,6 +36,10 @@ lazy_static::lazy_static! {
         SourceLanguage::GLSL,
         "main",
     );
+
+    static ref SHADERS: rendy::shader::ShaderSetBuilder = rendy::shader::ShaderSetBuilder::default()
+        .with_vertex(&*VERTEX).unwrap()
+        .with_fragment(&*FRAGMENT).unwrap();
 }
 
 #[derive(Clone, Copy)]
@@ -96,7 +100,7 @@ impl Settings {
 
     #[inline]
     fn transform_size(&self) -> u64 {
-        size_of::<Transform>() as u64 * self.total_max_mesh_instances
+        size_of::<Model>() as u64 * self.total_max_mesh_instances
     }
 
     #[inline]
@@ -235,40 +239,17 @@ where
         hal::pso::InstanceRate,
     )> {
         vec![
-            PosNormTangTex::VERTEX.gfx_vertex_input_desc(0),
-            Transform::VERTEX.gfx_vertex_input_desc(1),
+            PosNormTangTex::vertex().gfx_vertex_input_desc(0),
+            Model::vertex().gfx_vertex_input_desc(1),
         ]
     }
 
-    fn load_shader_set<'a>(
+    fn load_shader_set(
         &self,
-        storage: &'a mut Vec<B::ShaderModule>,
         factory: &mut Factory<B>,
         _aux: &specs::World,
-    ) -> hal::pso::GraphicsShaderSet<'a, B> {
-        storage.clear();
-
-        log::trace!("Load shader module '{:#?}'", *VERTEX);
-        storage.push(unsafe { VERTEX.module(factory).unwrap() });
-
-        log::trace!("Load shader module '{:#?}'", *FRAGMENT);
-        storage.push(unsafe { FRAGMENT.module(factory).unwrap() });
-
-        hal::pso::GraphicsShaderSet {
-            vertex: hal::pso::EntryPoint {
-                entry: "main",
-                module: &storage[0],
-                specialization: hal::pso::Specialization::default(),
-            },
-            fragment: Some(hal::pso::EntryPoint {
-                entry: "main",
-                module: &storage[1],
-                specialization: hal::pso::Specialization::default(),
-            }),
-            hull: None,
-            domain: None,
-            geometry: None,
-        }
+    ) -> rendy::shader::ShaderSet<B> {
+        SHADERS.build(factory, Default::default()).unwrap()
     }
 
     fn build<'a>(
@@ -625,7 +606,7 @@ where
             {
                 assert!(primitive
                     .mesh_data
-                    .bind(&[PosNormTangTex::VERTEX], &mut encoder)
+                    .bind(0, &[PosNormTangTex::vertex()], &mut encoder)
                     .is_ok());
                 encoder.bind_vertex_buffers(
                     1,
@@ -633,7 +614,7 @@ where
                         self.transform_buffer.raw(),
                         transforms_offset
                             + self.settings.mesh_transforms_index(primitive.mesh_handle) as u64
-                                * size_of::<Transform>() as u64,
+                                * size_of::<Model>() as u64,
                     )),
                 );
                 encoder.draw_indexed_indirect(
