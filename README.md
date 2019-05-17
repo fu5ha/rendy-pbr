@@ -27,6 +27,8 @@ other helpers. It is a testbed for `rendy` and Amethyst; much or all of what is 
 
 Building should straightforward, however there is a bit of extra complication compared to a standard Cargo project. First, this repo uses Git LFS to store demo asset files. This means that you need to install git-lfs before cloning the repo, or if you already have cloned it then install git lfs and do another pull, upon which you should download the necessary files.
 
+*Note*: If you receive an error like `rendy_pbr: Exit with Unnamed Error: The Decoder does not support the image format 'Unsupported image format'` upon running, do an explicit `git lfs pull`. Because I have it configured to pull from this repo's GitLab mirror's LFS storage, it seems that the repo needs to be cloned first before those settings are updated. Once they are, it will then properly download the LFS files. Also note that downloading the files stored in LFS is not explicitly required if you are providing your own glTF and environment map assets.
+
 Second, one of the dependencies, shaderc, is a little more complex to set up. See the [Setup](https://github.com/google/shaderc-rs#setup) section of the `shaderc-rs` repo for more information.
 
 With that done, you should just be able to run
