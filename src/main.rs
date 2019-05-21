@@ -7,6 +7,7 @@ use rendy::{
     command::{Graphics, Supports},
     factory::{Config, Factory, ImageState},
     graph::{present::PresentNode, render::*, GraphBuilder},
+    wsi::winit::{self, Event, EventsLoop, WindowBuilder, WindowEvent},
 };
 
 use std::{collections::HashSet, time};
@@ -14,8 +15,6 @@ use std::{collections::HashSet, time};
 use rendy::hal;
 
 use specs::prelude::*;
-
-use winit::{Event, EventsLoop, WindowBuilder, WindowEvent};
 
 mod asset;
 mod components;
@@ -130,8 +129,12 @@ fn run() -> Result<(), failure::Error> {
     #[cfg(feature = "rd")]
     rd.start_frame_capture(std::ptr::null(), std::ptr::null());
 
-    let surface = factory.create_surface(window.into());
-    let aspect = surface.aspect();
+    let surface = factory.create_surface(&window);
+    let size = window
+        .get_inner_size()
+        .unwrap()
+        .to_physical(window.get_hidpi_factor());
+    let aspect = (size.width / size.height) as f32;
 
     let align = hal::adapter::PhysicalDevice::limits(factory.physical())
         .min_uniform_buffer_offset_alignment;
@@ -161,7 +164,7 @@ fn run() -> Result<(), failure::Error> {
     let env_cube_faces_img = env_preprocess_graph_builder.create_image(
         hal::image::Kind::D2(ENV_CUBEMAP_RES, ENV_CUBEMAP_RES * 6, 1, 1),
         1,
-        hal::format::Format::Rgba32Float,
+        hal::format::Format::Rgba32Sfloat,
         Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
     );
 
@@ -186,7 +189,7 @@ fn run() -> Result<(), failure::Error> {
     let irradiance_cube_faces_img = env_preprocess_graph_builder.create_image(
         hal::image::Kind::D2(IRRADIANCE_CUBEMAP_RES, IRRADIANCE_CUBEMAP_RES * 6, 1, 1),
         1,
-        hal::format::Format::Rgba32Float,
+        hal::format::Format::Rgba32Sfloat,
         Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
     );
 
@@ -220,7 +223,7 @@ fn run() -> Result<(), failure::Error> {
         let image = env_preprocess_graph_builder.create_image(
             hal::image::Kind::D2(res, res * 6, 1, 1),
             1,
-            hal::format::Format::Rgba32Float,
+            hal::format::Format::Rgba32Sfloat,
             Some(hal::command::ClearValue::Color([0.0, 0.0, 0.0, 1.0].into())),
         );
         subpass.add_color(image);
@@ -251,7 +254,7 @@ fn run() -> Result<(), failure::Error> {
     let spec_brdf_map = env_preprocess_graph_builder.create_image(
         hal::image::Kind::D2(SPEC_BRDF_MAP_RES, SPEC_BRDF_MAP_RES, 1, 1),
         1,
-        hal::format::Format::Rg32Float,
+        hal::format::Format::Rg32Sfloat,
         Some(hal::command::ClearValue::Color([0.0, 0.0].into())),
     );
 
@@ -305,7 +308,7 @@ fn run() -> Result<(), failure::Error> {
         .with_data_width(ENV_CUBEMAP_RES)
         .with_data_height(ENV_CUBEMAP_RES)
         .with_data(vec![
-            rendy::texture::pixel::Rgba32Float {
+            rendy::texture::pixel::Rgba32Sfloat {
                 repr: [0.0, 0.0, 0.0, 1.0]
             };
             (ENV_CUBEMAP_RES * ENV_CUBEMAP_RES * 6) as usize
@@ -331,7 +334,7 @@ fn run() -> Result<(), failure::Error> {
         .with_data_width(IRRADIANCE_CUBEMAP_RES)
         .with_data_height(IRRADIANCE_CUBEMAP_RES)
         .with_data(vec![
-            rendy::texture::pixel::Rgba32Float {
+            rendy::texture::pixel::Rgba32Sfloat {
                 repr: [0.0, 0.0, 0.0, 1.0]
             };
             (IRRADIANCE_CUBEMAP_RES * IRRADIANCE_CUBEMAP_RES * 6)
@@ -361,7 +364,7 @@ fn run() -> Result<(), failure::Error> {
         .with_data_width(SPEC_CUBEMAP_RES)
         .with_data_height(SPEC_CUBEMAP_RES)
         .with_data(vec![
-            rendy::texture::pixel::Rgba32Float {
+            rendy::texture::pixel::Rgba32Sfloat {
                 repr: [0.0, 0.0, 0.0, 1.0]
             };
             (SPEC_CUBEMAP_RES * SPEC_CUBEMAP_RES * 6) as usize
@@ -387,7 +390,7 @@ fn run() -> Result<(), failure::Error> {
         .with_data_width(SPEC_BRDF_MAP_RES)
         .with_data_height(SPEC_BRDF_MAP_RES)
         .with_data(vec![
-            rendy::texture::pixel::Rg32Float { repr: [0.0, 0.0] };
+            rendy::texture::pixel::Rg32Sfloat { repr: [0.0, 0.0] };
             (SPEC_BRDF_MAP_RES * SPEC_BRDF_MAP_RES) as usize
         ])
         .build(
@@ -432,23 +435,23 @@ fn run() -> Result<(), failure::Error> {
     let mut pbr_graph_builder = GraphBuilder::<Backend, specs::World>::new();
 
     let hdr = pbr_graph_builder.create_image(
-        surface.kind(),
+        hal::image::Kind::D2(size.width as u32, size.height as u32, 1, 1),
         1,
-        hal::format::Format::Rgba32Float,
+        hal::format::Format::Rgba32Sfloat,
         Some(hal::command::ClearValue::Color([0.1, 0.3, 0.4, 1.0].into())),
     );
 
     let color = pbr_graph_builder.create_image(
-        surface.kind(),
+        hal::image::Kind::D2(size.width as u32, size.height as u32, 1, 1),
         1,
         factory.get_surface_format(&surface),
         Some(hal::command::ClearValue::Color([0.1, 0.3, 0.4, 1.0].into())),
     );
 
     let depth = pbr_graph_builder.create_image(
-        surface.kind(),
+        hal::image::Kind::D2(size.width as u32, size.height as u32, 1, 1),
         1,
-        hal::format::Format::D32Float,
+        hal::format::Format::D32Sfloat,
         Some(hal::command::ClearValue::DepthStencil(
             hal::command::ClearDepthStencil(1.0, 0),
         )),

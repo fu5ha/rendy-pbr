@@ -1,6 +1,6 @@
 use crate::{asset, components, input, node};
 use nalgebra::Similarity3;
-use rendy::hal;
+use rendy::{hal, wsi::winit};
 use specs::{prelude::*, storage::UnprotectedStorage};
 
 use std::collections::HashSet;

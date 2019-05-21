@@ -118,6 +118,7 @@ where
                         count: 1,
                     },
                 ],
+                hal::pso::DescriptorPoolCreateFlags::empty(),
             )?
         };
 

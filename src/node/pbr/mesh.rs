@@ -236,11 +236,11 @@ where
     ) -> Vec<(
         Vec<hal::pso::Element<hal::format::Format>>,
         hal::pso::ElemStride,
-        hal::pso::InstanceRate,
+        hal::pso::VertexInputRate,
     )> {
         vec![
-            PosNormTangTex::vertex().gfx_vertex_input_desc(0),
-            Model::vertex().gfx_vertex_input_desc(1),
+            PosNormTangTex::vertex().gfx_vertex_input_desc(hal::pso::VertexInputRate::Vertex),
+            Model::vertex().gfx_vertex_input_desc(hal::pso::VertexInputRate::Instance(1)),
         ]
     }
 
@@ -291,6 +291,7 @@ where
                         count: (num_mats * 5) + (num_env_maps),
                     },
                 ],
+                hal::pso::DescriptorPoolCreateFlags::empty(),
             )?
         };
 

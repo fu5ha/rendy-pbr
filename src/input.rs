@@ -1,5 +1,5 @@
 use derivative::Derivative;
-use winit::{ElementState, ModifiersState, WindowEvent};
+use rendy::wsi::winit::{self, ElementState, ModifiersState, WindowEvent};
 
 #[derive(Default)]
 pub struct EventBucket(pub Vec<winit::Event>);

@@ -199,6 +199,7 @@ where
                         count: frames,
                     },
                 ],
+                hal::pso::DescriptorPoolCreateFlags::empty(),
             )?
         };
 
@@ -214,7 +215,7 @@ where
                 image_handle.clone(),
                 ImageViewInfo {
                     view_kind: ViewKind::D2,
-                    format: hal::format::Format::Rgba32Float,
+                    format: hal::format::Format::Rgba32Sfloat,
                     swizzle: hal::format::Swizzle::NO,
                     range: images[0].range.clone(),
                 },

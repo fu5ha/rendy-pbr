@@ -11,6 +11,8 @@ use rendy::hal;
 
 use crate::node::env_preprocess::Aux;
 
+use std::borrow::Cow;
+
 lazy_static::lazy_static! {
     static ref VERTEX: PathBufShaderInfo = PathBufShaderInfo::new(
         std::path::PathBuf::from(crate::application_root_dir()).join("assets/shaders/unproject_cubemap_tex.vert"),
@@ -66,8 +68,14 @@ where
     ) -> rendy::shader::ShaderSet<B> {
         let mut spec_constants = rendy::shader::SpecConstantSet::default();
         spec_constants.fragment = Some(hal::pso::Specialization {
-            constants: &[hal::pso::SpecializationConstant { id: 0, range: 0..4 }],
-            data: unsafe { std::mem::transmute::<&u32, &[u8; 4]>(&aux.irradiance_theta_samples) },
+            constants: Cow::from(vec![hal::pso::SpecializationConstant {
+                id: 0,
+                range: 0..4,
+            }]),
+            data: Cow::from(
+                &unsafe { std::mem::transmute::<&u32, &[u8; 4]>(&aux.irradiance_theta_samples) }
+                    [0..4],
+            ),
         });
         SHADERS.build(factory, spec_constants).unwrap()
     }
@@ -123,6 +131,7 @@ where
                         count: 1,
                     },
                 ],
+                hal::pso::DescriptorPoolCreateFlags::empty(),
             )?
         };
 

@@ -111,9 +111,9 @@ where
     ) -> Vec<(
         Vec<hal::pso::Element<hal::format::Format>>,
         hal::pso::ElemStride,
-        hal::pso::InstanceRate,
+        hal::pso::VertexInputRate,
     )> {
-        vec![Position::vertex().gfx_vertex_input_desc(0)]
+        vec![Position::vertex().gfx_vertex_input_desc(hal::pso::VertexInputRate::Vertex)]
     }
 
     fn load_shader_set(
@@ -210,6 +210,7 @@ where
                         count: 3,
                     },
                 ],
+                hal::pso::DescriptorPoolCreateFlags::empty(),
             )?
         };
 

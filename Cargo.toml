@@ -26,7 +26,6 @@ failure = "0.1"
 lazy_static = "1.0"
 image = "0.20.1"
 log = "0.4"
-winit = "0.18"
 palette = "0.4"
 rand = "0.6"
 derivative = "1.0"
@@ -41,13 +40,9 @@ version = "0.4"
 optional = true
 
 [dependencies.gltf]
-git = "https://github.com/gltf-rs/gltf"
-rev = "acf33a93e82aea16fd36e81f9a667d5b2ab064a1"
-# path = "../gltf"
+version = "0.12"
 
 [dependencies.rendy]
 optional = true
-# path = "../rendy/rendy"
-features = ["texture-image"]
-git = "https://github.com/termhn/rendy"
-branch = "spec-constants"
+version = "0.2"
+features = ["texture-image", "shader-compiler"]
