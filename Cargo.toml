@@ -46,6 +46,7 @@ version = "0.12"
 [dependencies.rendy]
 optional = true
 # version = "0.5"
-git = "https://github.com/termhn/rendy"
-branch = "build-error-impl"
+git = "https://github.com/amethyst/rendy"
+# branch = "master"
+rev = "8c5388c3e5ba63a5d48088e91f6aab88f03e23b9"
 features = ["base", "init-winit", "texture-image", "shader-compiler"]
