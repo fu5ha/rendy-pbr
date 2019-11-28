@@ -1,17 +1,20 @@
 use derivative::Derivative;
-use rendy::wsi::winit::{self, ElementState, ModifiersState, WindowEvent};
+use rendy::init::winit::{
+    self,
+    event::{ElementState, Event, ModifiersState, MouseButton, WindowEvent},
+};
 
 #[derive(Default)]
-pub struct EventBucket(pub Vec<winit::Event>);
+pub struct EventBucket(pub Vec<Event<()>>);
 
 #[derive(Derivative, Debug, Clone, Copy)]
 #[derivative(Default)]
 pub struct MouseState {
-    #[derivative(Default(value = "winit::ElementState::Released"))]
+    #[derivative(Default(value = "ElementState::Released"))]
     pub left: ElementState,
-    #[derivative(Default(value = "winit::ElementState::Released"))]
+    #[derivative(Default(value = "ElementState::Released"))]
     pub right: ElementState,
-    #[derivative(Default(value = "winit::ElementState::Released"))]
+    #[derivative(Default(value = "ElementState::Released"))]
     pub middle: ElementState,
     #[derivative(Default(value = "winit::dpi::LogicalPosition::new(0., 0.)"))]
     pub pos: winit::dpi::LogicalPosition,
@@ -52,7 +55,6 @@ impl InputState {
     }
 
     pub fn update_with_window_event(&mut self, event: &WindowEvent) {
-        use winit::{MouseButton, WindowEvent};
         match *event {
             WindowEvent::CursorMoved {
                 position,

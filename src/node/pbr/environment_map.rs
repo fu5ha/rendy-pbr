@@ -9,7 +9,7 @@ use rendy::{
     command::{QueueId, RenderPassEncoder},
     factory::Factory,
     graph::{render::*, GraphContext, NodeBuffer, NodeImage},
-    hal::{pso::DescriptorPool, Device},
+    hal::{device::Device, pso::DescriptorPool},
     memory::MemoryUsageValue,
     mesh::{AsVertex, Mesh, Position},
     resource::{Buffer, BufferInfo, DescriptorSetLayout, Escape, Handle},
@@ -169,7 +169,7 @@ where
         buffers: Vec<NodeBuffer>,
         images: Vec<NodeImage>,
         set_layouts: &[Handle<DescriptorSetLayout<B>>],
-    ) -> Result<Pipeline<B>, failure::Error> {
+    ) -> Result<Pipeline<B>, hal::pso::CreationError> {
         assert!(buffers.is_empty());
         assert!(images.is_empty());
         assert!(set_layouts.len() == 2);
@@ -191,43 +191,48 @@ where
 
         let cube = Mesh::<B>::builder()
             .with_vertices(&cube_flattened_vertices[..])
-            .build(queue, factory)?;
+            .build(queue, factory)
+            .unwrap();
 
         let mut pool = unsafe {
-            factory.create_descriptor_pool(
-                frames + 3,
-                vec![
-                    hal::pso::DescriptorRangeDesc {
-                        ty: hal::pso::DescriptorType::UniformBuffer,
-                        count: frames,
-                    },
-                    hal::pso::DescriptorRangeDesc {
-                        ty: hal::pso::DescriptorType::Sampler,
-                        count: 3,
-                    },
-                    hal::pso::DescriptorRangeDesc {
-                        ty: hal::pso::DescriptorType::SampledImage,
-                        count: 3,
-                    },
-                ],
-                hal::pso::DescriptorPoolCreateFlags::empty(),
-            )?
+            factory
+                .create_descriptor_pool(
+                    frames + 3,
+                    vec![
+                        hal::pso::DescriptorRangeDesc {
+                            ty: hal::pso::DescriptorType::UniformBuffer,
+                            count: frames,
+                        },
+                        hal::pso::DescriptorRangeDesc {
+                            ty: hal::pso::DescriptorType::Sampler,
+                            count: 3,
+                        },
+                        hal::pso::DescriptorRangeDesc {
+                            ty: hal::pso::DescriptorType::SampledImage,
+                            count: 3,
+                        },
+                    ],
+                    hal::pso::DescriptorPoolCreateFlags::empty(),
+                )
+                .unwrap()
         };
 
         let settings = Settings::from_world::<B>(world);
 
-        let buffer = factory.create_buffer(
-            BufferInfo {
-                size: settings.buffer_frame_size() * frames as u64,
-                usage: hal::buffer::Usage::UNIFORM,
-            },
-            MemoryUsageValue::Dynamic,
-        )?;
+        let buffer = factory
+            .create_buffer(
+                BufferInfo {
+                    size: settings.buffer_frame_size() * frames as u64,
+                    usage: hal::buffer::Usage::UNIFORM,
+                },
+                MemoryUsageValue::Dynamic,
+            )
+            .unwrap();
 
         let mut ubo_sets = Vec::new();
         for frame in 0..frames {
             ubo_sets.push(unsafe {
-                let set = pool.allocate_set(&set_layouts[0].raw())?;
+                let set = pool.allocate_set(&set_layouts[0].raw()).unwrap();
                 factory.write_descriptor_sets(vec![hal::pso::DescriptorSetWrite {
                     set: &set,
                     binding: 0,
@@ -243,7 +248,7 @@ where
         }
 
         let env_cubemap_set = unsafe {
-            let set = pool.allocate_set(&set_layouts[1].raw())?;
+            let set = pool.allocate_set(&set_layouts[1].raw()).unwrap();
             factory.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
                     set: &set,
@@ -267,7 +272,7 @@ where
         };
 
         let irradiance_cubemap_set = unsafe {
-            let set = pool.allocate_set(&set_layouts[1].raw())?;
+            let set = pool.allocate_set(&set_layouts[1].raw()).unwrap();
             factory.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
                     set: &set,
@@ -296,7 +301,7 @@ where
         };
 
         let spec_cubemap_set = unsafe {
-            let set = pool.allocate_set(&set_layouts[1].raw())?;
+            let set = pool.allocate_set(&set_layouts[1].raw()).unwrap();
             factory.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
                     set: &set,
@@ -399,13 +404,15 @@ where
             CubeDisplay::Environment => &self.env_cubemap_set,
             CubeDisplay::Specular => &self.spec_cubemap_set,
         };
-        encoder.bind_graphics_descriptor_sets(
-            layout,
-            0,
-            vec![&self.ubo_sets[index], cube_set],
-            std::iter::empty(),
-        );
-        encoder.draw(0..36, 0..1);
+        unsafe {
+            encoder.bind_graphics_descriptor_sets(
+                layout,
+                0,
+                vec![&self.ubo_sets[index], cube_set],
+                std::iter::empty(),
+            );
+            encoder.draw(0..36, 0..1);
+        }
     }
 
     fn dispose(mut self, factory: &mut Factory<B>, _aux: &specs::World) {

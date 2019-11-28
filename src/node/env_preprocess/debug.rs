@@ -7,7 +7,7 @@ use rendy::{
     command::{QueueId, RenderPassEncoder},
     factory::Factory,
     graph::{render::*, GraphContext, NodeBuffer, NodeImage},
-    hal::{pso::DescriptorPool, Device},
+    hal::{device::Device, pso::DescriptorPool},
     memory::MemoryUsageValue,
     mesh::{AsVertex, Mesh, Position},
     resource::{Buffer, BufferInfo, DescriptorSetLayout, Escape, Handle},
@@ -109,7 +109,10 @@ where
     }
 
     fn colors(&self) -> Vec<hal::pso::ColorBlendDesc> {
-        vec![hal::pso::ColorBlendDesc(hal::pso::ColorMask::ALL, hal::pso::BlendState::Off,); 1]
+        vec![hal::pso::ColorBlendDesc {
+            mask: hal::pso::ColorMask::ALL,
+            blend: None,
+        }]
     }
 
     fn depth_stencil(&self) -> Option<hal::pso::DepthStencilDesc> {
@@ -164,7 +167,7 @@ where
         buffers: Vec<NodeBuffer>,
         images: Vec<NodeImage>,
         set_layouts: &[Handle<DescriptorSetLayout<B>>],
-    ) -> Result<Pipeline<B>, failure::Error> {
+    ) -> Result<Pipeline<B>, hal::pso::CreationError> {
         assert!(buffers.is_empty());
         assert!(images.is_empty());
         assert!(set_layouts.len() == 1);
@@ -182,7 +185,8 @@ where
 
         let cube = Mesh::<B>::builder()
             .with_vertices(&cube_flattened_vertices[..])
-            .build(queue, factory)?;
+            .build(queue, factory)
+            .unwrap();
 
         let mut pool = unsafe {
             factory.create_descriptor_pool(
@@ -207,16 +211,18 @@ where
 
         let settings: Settings = aux.into();
 
-        let mut buffer = factory.create_buffer(
-            BufferInfo {
-                size: settings.buffer_frame_size(),
-                usage: hal::buffer::Usage::UNIFORM,
-            },
-            MemoryUsageValue::Dynamic,
-        )?;
+        let mut buffer = factory
+            .create_buffer(
+                BufferInfo {
+                    size: settings.buffer_frame_size(),
+                    usage: hal::buffer::Usage::UNIFORM,
+                },
+                MemoryUsageValue::Dynamic,
+            )
+            .unwrap();
 
         let set = unsafe {
-            let set = pool.allocate_set(&set_layouts[0].raw())?;
+            let set = pool.allocate_set(&set_layouts[0].raw()).unwrap();
             factory.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
                     set: &set,
@@ -250,28 +256,30 @@ where
 
         let origin = nalgebra::Point3::origin();
         unsafe {
-            factory.upload_visible_buffer(
-                &mut buffer,
-                0,
-                &[UniformArgs {
-                    proj: {
-                        let mut proj = nalgebra::Perspective3::<f32>::new(
-                            1.0,
-                            std::f32::consts::FRAC_PI_2,
-                            0.1,
-                            100.0,
-                        )
-                        .to_homogeneous();
-                        proj[(1, 1)] *= -1.0;
-                        proj
-                    },
-                    view: nalgebra::Matrix4::look_at_rh(
-                        &origin,
-                        &nalgebra::Point3::new(0.0, 0.0, 1.0),
-                        &-nalgebra::Vector3::y(),
-                    ),
-                }],
-            )?
+            factory
+                .upload_visible_buffer(
+                    &mut buffer,
+                    0,
+                    &[UniformArgs {
+                        proj: {
+                            let mut proj = nalgebra::Perspective3::<f32>::new(
+                                1.0,
+                                std::f32::consts::FRAC_PI_2,
+                                0.1,
+                                100.0,
+                            )
+                            .to_homogeneous();
+                            proj[(1, 1)] *= -1.0;
+                            proj
+                        },
+                        view: nalgebra::Matrix4::look_at_rh(
+                            &origin,
+                            &nalgebra::Point3::new(0.0, 0.0, 1.0),
+                            &-nalgebra::Vector3::y(),
+                        ),
+                    }],
+                )
+                .unwrap()
         };
 
         Ok(Pipeline {
@@ -311,8 +319,10 @@ where
             .cube
             .bind(0, &[Position::vertex()], &mut encoder)
             .is_ok());
-        encoder.bind_graphics_descriptor_sets(layout, 0, Some(&self.set), std::iter::empty());
-        encoder.draw(0..36, 0..6);
+        unsafe {
+            encoder.bind_graphics_descriptor_sets(layout, 0, Some(&self.set), std::iter::empty());
+            encoder.draw(0..36, 0..6);
+        }
     }
 
     fn dispose(mut self, factory: &mut Factory<B>, _aux: &Aux<B>) {

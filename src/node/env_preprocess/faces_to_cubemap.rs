@@ -1,13 +1,13 @@
 use rendy::{
     command::{
-        CommandBuffer, CommandPool, ExecutableState, Family, FamilyId, Fence, MultiShot,
+        CommandBuffer, CommandPool, ExecutableState, Families, Family, FamilyId, Fence, MultiShot,
         PendingState, Queue, QueueId, SimultaneousUse, Submission, Submit, Supports, Transfer,
     },
     factory::{blit_image, BlitRegion, Factory, ImageState},
     frame::Frames,
     graph::{
         gfx_acquire_barriers, gfx_release_barriers, BufferAccess, BufferId, DynNode, GraphContext,
-        ImageAccess, ImageId, NodeBuffer, NodeBuilder, NodeId, NodeImage,
+        ImageAccess, ImageId, NodeBuffer, NodeBuildError, NodeBuilder, NodeId, NodeImage,
     },
     texture::Texture,
 };
@@ -22,10 +22,13 @@ pub enum CopyMips {
 
 #[derive(Debug)]
 pub struct FacesToCubemap<B: hal::Backend> {
-    pool: CommandPool<B, hal::QueueType>,
+    pool: CommandPool<B>,
     submit: Submit<B, SimultaneousUse>,
-    buffer:
-        CommandBuffer<B, hal::QueueType, PendingState<ExecutableState<MultiShot<SimultaneousUse>>>>,
+    buffer: CommandBuffer<
+        B,
+        hal::queue::QueueType,
+        PendingState<ExecutableState<MultiShot<SimultaneousUse>>>,
+    >,
 }
 
 impl<B: hal::Backend> FacesToCubemap<B> {
@@ -80,11 +83,8 @@ where
     B: hal::Backend,
     FR: FacesToCubemapResource<B>,
 {
-    fn family(&self, _factory: &mut Factory<B>, families: &[Family<B>]) -> Option<FamilyId> {
-        families
-            .iter()
-            .find(|family| Supports::<Transfer>::supports(&family.capability()).is_some())
-            .map(|family| family.id())
+    fn family(&self, _factory: &mut Factory<B>, families: &Families<B>) -> Option<FamilyId> {
+        families.find(|family| Supports::<Transfer>::supports(&family.capability()).is_some())
     }
 
     fn buffers(&self) -> Vec<(BufferId, BufferAccess)> {
@@ -121,7 +121,7 @@ where
         aux: &FR,
         buffers: Vec<NodeBuffer>,
         images: Vec<NodeImage>,
-    ) -> Result<Box<dyn DynNode<B, FR>>, failure::Error> {
+    ) -> Result<Box<dyn DynNode<B, FR>>, NodeBuildError> {
         assert_eq!(buffers.len(), 0);
         if let CopyMips::CopyMips(mip_levels) = self.mips {
             assert_eq!(images.len(), mip_levels as usize);
@@ -129,7 +129,7 @@ where
             assert_eq!(images.len(), 1);
         }
 
-        let mut pool = factory.create_command_pool(family)?;
+        let mut pool = factory.create_command_pool(family).unwrap();
 
         let buf_initial = pool.allocate_buffers(1).pop().unwrap();
         let mut buf_recording = buf_initial.begin(MultiShot(SimultaneousUse), ());
@@ -140,7 +140,9 @@ where
             let (stages, barriers) = gfx_acquire_barriers(ctx, None, images.iter());
             log::trace!("Acquire {:?} : {:#?}", stages, barriers);
             if !barriers.is_empty() {
-                encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
+                unsafe {
+                    encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
+                }
             }
         }
 
@@ -148,35 +150,37 @@ where
             let image = ctx.get_image(cube_image.id).unwrap();
             let layer_height = image.kind().extent().height / 6;
             for layer in 0..6 {
-                encoder.copy_image(
-                    image.raw(),
-                    cube_image.layout,
-                    target_cubemap.image().raw(),
-                    hal::image::Layout::TransferDstOptimal,
-                    Some(hal::command::ImageCopy {
-                        src_subresource: hal::image::SubresourceLayers {
-                            aspects: hal::format::Aspects::COLOR,
-                            level: 0,
-                            layers: 0..1,
-                        },
-                        src_offset: hal::image::Offset {
-                            x: 0,
-                            y: (layer_height * layer) as i32,
-                            z: 0,
-                        },
-                        dst_subresource: hal::image::SubresourceLayers {
-                            aspects: hal::format::Aspects::COLOR,
-                            level: mip_level as u8,
-                            layers: (layer as u16)..(layer as u16 + 1),
-                        },
-                        dst_offset: hal::image::Offset::ZERO,
-                        extent: hal::image::Extent {
-                            width: image.kind().extent().width,
-                            height: image.kind().extent().height / 6,
-                            depth: 1,
-                        },
-                    }),
-                );
+                unsafe {
+                    encoder.copy_image(
+                        image.raw(),
+                        cube_image.layout,
+                        target_cubemap.image().raw(),
+                        hal::image::Layout::TransferDstOptimal,
+                        Some(hal::command::ImageCopy {
+                            src_subresource: hal::image::SubresourceLayers {
+                                aspects: hal::format::Aspects::COLOR,
+                                level: 0,
+                                layers: 0..1,
+                            },
+                            src_offset: hal::image::Offset {
+                                x: 0,
+                                y: (layer_height * layer) as i32,
+                                z: 0,
+                            },
+                            dst_subresource: hal::image::SubresourceLayers {
+                                aspects: hal::format::Aspects::COLOR,
+                                level: mip_level as u8,
+                                layers: (layer as u16)..(layer as u16 + 1),
+                            },
+                            dst_offset: hal::image::Offset::ZERO,
+                            extent: hal::image::Extent {
+                                width: image.kind().extent().width,
+                                height: image.kind().extent().height / 6,
+                                depth: 1,
+                            },
+                        }),
+                    );
+                }
             }
         }
 
@@ -207,7 +211,7 @@ where
                         target_cubemap.image(),
                         hal::image::Filter::Linear,
                         Some(blit),
-                    )?;
+                    );
                 }
             }
         }
@@ -238,7 +242,9 @@ where
 
             log::trace!("Release {:?} : {:#?}", stages, barriers);
             if !barriers.is_empty() {
-                encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
+                unsafe {
+                    encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
+                }
             }
         }
 

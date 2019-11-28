@@ -2,11 +2,11 @@ use rendy::{
     command::{DrawIndexedCommand, QueueId, RenderPassEncoder},
     factory::Factory,
     graph::{render::*, GraphContext, NodeBuffer, NodeImage},
-    hal::{pso::DescriptorPool, Device},
+    hal::{device::Device, pso::DescriptorPool},
     memory::MemoryUsageValue,
     mesh::{AsVertex, Model, PosNormTangTex},
     resource::{
-        Buffer, BufferInfo, DescriptorSetLayout, Escape, Filter, Handle, Sampler, SamplerInfo,
+        Buffer, BufferInfo, DescriptorSetLayout, Escape, Filter, Handle, Sampler, SamplerDesc,
         WrapMode,
     },
     shader::{PathBufShaderInfo, ShaderKind, SourceLanguage},
@@ -261,7 +261,7 @@ where
         buffers: Vec<NodeBuffer>,
         images: Vec<NodeImage>,
         set_layouts: &[Handle<DescriptorSetLayout<B>>],
-    ) -> Result<Pipeline<B>, failure::Error> {
+    ) -> Result<Pipeline<B>, hal::pso::CreationError> {
         assert!(buffers.is_empty());
         assert!(images.is_empty());
         assert_eq!(set_layouts.len(), 3);
@@ -297,26 +297,31 @@ where
 
         let settings = Settings::from_world::<B>(world);
 
-        let uniform_indirect_buffer = factory.create_buffer(
-            BufferInfo {
-                size: settings.uniform_indirect_buffer_frame_size() * frames as u64,
-                usage: hal::buffer::Usage::UNIFORM | hal::buffer::Usage::INDIRECT,
-            },
-            MemoryUsageValue::Dynamic,
-        )?;
-        let transform_buffer = factory.create_buffer(
-            BufferInfo {
-                size: settings.transform_buffer_frame_size() * frames as u64,
-                usage: hal::buffer::Usage::VERTEX,
-            },
-            MemoryUsageValue::Dynamic,
-        )?;
+        let uniform_indirect_buffer = factory
+            .create_buffer(
+                BufferInfo {
+                    size: settings.uniform_indirect_buffer_frame_size() * frames as u64,
+                    usage: hal::buffer::Usage::UNIFORM | hal::buffer::Usage::INDIRECT,
+                },
+                MemoryUsageValue::Dynamic,
+            )
+            .unwrap();
+        let transform_buffer = factory
+            .create_buffer(
+                BufferInfo {
+                    size: settings.transform_buffer_frame_size() * frames as u64,
+                    usage: hal::buffer::Usage::VERTEX,
+                },
+                MemoryUsageValue::Dynamic,
+            )
+            .unwrap();
 
-        let texture_sampler =
-            factory.create_sampler(SamplerInfo::new(Filter::Linear, WrapMode::Clamp))?;
+        let texture_sampler = factory
+            .create_sampler(SamplerDesc::new(Filter::Linear, WrapMode::Clamp))
+            .unwrap();
 
         let static_set = unsafe {
-            let set = descriptor_pool.allocate_set(&set_layouts[0].raw())?;
+            let set = descriptor_pool.allocate_set(&set_layouts[0].raw()).unwrap();
             factory.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
                     set: &set,
@@ -358,7 +363,7 @@ where
         let mut ubo_sets = Vec::with_capacity(frames);
         for index in 0..frames {
             unsafe {
-                let set = descriptor_pool.allocate_set(&set_layouts[1].raw())?;
+                let set = descriptor_pool.allocate_set(&set_layouts[1].raw()).unwrap();
                 factory.write_descriptor_sets(vec![hal::pso::DescriptorSetWrite {
                     set: &set,
                     binding: 0,
@@ -377,7 +382,7 @@ where
 
         for mat_data in material_storage.0.iter() {
             unsafe {
-                let set = descriptor_pool.allocate_set(&set_layouts[2].raw())?;
+                let set = descriptor_pool.allocate_set(&set_layouts[2].raw()).unwrap();
                 factory.write_descriptor_sets(vec![
                     hal::pso::DescriptorSetWrite {
                         set: &set,
@@ -589,16 +594,20 @@ where
         world: &specs::World,
     ) {
         let primitive_storage = world.read_resource::<asset::PrimitiveStorage<B>>();
-        encoder.bind_graphics_descriptor_sets(
-            layout,
-            0,
-            vec![&self.static_set, &self.ubo_sets[index]],
-            std::iter::empty(),
-        );
+        unsafe {
+            encoder.bind_graphics_descriptor_sets(
+                layout,
+                0,
+                vec![&self.static_set, &self.ubo_sets[index]],
+                std::iter::empty(),
+            );
+        }
         let transforms_offset = self.settings.transforms_offset(index as u64);
         let indirect_offset = self.settings.indirect_offset(index as u64);
         for (mat_idx, set) in self.mat_sets.iter().enumerate() {
-            encoder.bind_graphics_descriptor_sets(layout, 2, Some(set), std::iter::empty());
+            unsafe {
+                encoder.bind_graphics_descriptor_sets(layout, 2, Some(set), std::iter::empty());
+            }
             for (prim_idx, primitive) in primitive_storage
                 .0
                 .iter()
@@ -609,21 +618,23 @@ where
                     .mesh_data
                     .bind(0, &[PosNormTangTex::vertex()], &mut encoder)
                     .is_ok());
-                encoder.bind_vertex_buffers(
-                    1,
-                    std::iter::once((
-                        self.transform_buffer.raw(),
-                        transforms_offset
-                            + self.settings.mesh_transforms_index(primitive.mesh_handle) as u64
-                                * size_of::<Model>() as u64,
-                    )),
-                );
-                encoder.draw_indexed_indirect(
-                    self.uniform_indirect_buffer.raw(),
-                    indirect_offset + self.settings.primitive_indirect_offset(prim_idx),
-                    1,
-                    size_of::<DrawIndexedCommand>() as u32,
-                );
+                unsafe {
+                    encoder.bind_vertex_buffers(
+                        1,
+                        std::iter::once((
+                            self.transform_buffer.raw(),
+                            transforms_offset
+                                + self.settings.mesh_transforms_index(primitive.mesh_handle) as u64
+                                    * size_of::<Model>() as u64,
+                        )),
+                    );
+                    encoder.draw_indexed_indirect(
+                        self.uniform_indirect_buffer.raw(),
+                        indirect_offset + self.settings.primitive_indirect_offset(prim_idx),
+                        1,
+                        size_of::<DrawIndexedCommand>() as u32,
+                    );
+                }
             }
         }
     }

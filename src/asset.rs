@@ -323,6 +323,7 @@ where
                     ..Default::default()
                 },
             )
+            .map_err(|e| e.into())
         }
     }
 }

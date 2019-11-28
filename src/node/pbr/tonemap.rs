@@ -2,10 +2,10 @@ use rendy::{
     command::{QueueId, RenderPassEncoder},
     factory::Factory,
     graph::{render::*, GraphContext, ImageAccess, NodeBuffer, NodeImage},
-    hal::{pso::DescriptorPool, Device},
+    hal::{device::Device, pso::DescriptorPool},
     resource::{
         Buffer, BufferInfo, DescriptorSetLayout, Escape, Filter, Handle, ImageView, ImageViewInfo,
-        Sampler, SamplerInfo, ViewKind, WrapMode,
+        Sampler, SamplerDesc, ViewKind, WrapMode,
     },
     shader::{PathBufShaderInfo, ShaderKind, SourceLanguage},
 };
@@ -171,7 +171,7 @@ where
         buffers: Vec<NodeBuffer>,
         images: Vec<NodeImage>,
         set_layouts: &[Handle<DescriptorSetLayout<B>>],
-    ) -> Result<Pipeline<B>, failure::Error> {
+    ) -> Result<Pipeline<B>, hal::pso::CreationError> {
         assert!(buffers.is_empty());
         assert!(images.len() == 1);
         assert!(set_layouts.len() == 1);
@@ -203,12 +203,13 @@ where
             )?
         };
 
-        let image_sampler =
-            factory.create_sampler(SamplerInfo::new(Filter::Nearest, WrapMode::Clamp))?;
+        let image_sampler = factory
+            .create_sampler(SamplerDesc::new(Filter::Nearest, WrapMode::Clamp))
+            .unwrap();
 
         let image_handle = ctx
             .get_image(images[0].id)
-            .ok_or(failure::format_err!("Tonemapper HDR image missing"))?;
+            .expect("Tonemapper HDR image missing");
 
         let image_view = factory
             .create_image_view(
@@ -222,18 +223,20 @@ where
             )
             .expect("Could not create tonemapper input image view");
 
-        let buffer = factory.create_buffer(
-            BufferInfo {
-                size: settings.buffer_frame_size() * aux.frames as u64,
-                usage: hal::buffer::Usage::UNIFORM,
-            },
-            rendy::memory::MemoryUsageValue::Dynamic,
-        )?;
+        let buffer = factory
+            .create_buffer(
+                BufferInfo {
+                    size: settings.buffer_frame_size() * aux.frames as u64,
+                    usage: hal::buffer::Usage::UNIFORM,
+                },
+                rendy::memory::MemoryUsageValue::Dynamic,
+            )
+            .unwrap();
 
         let mut sets = Vec::with_capacity(frames);
         for index in 0..frames {
             unsafe {
-                let set = descriptor_pool.allocate_set(&set_layouts[0].raw())?;
+                let set = descriptor_pool.allocate_set(&set_layouts[0].raw()).unwrap();
                 factory.write_descriptor_sets(vec![
                     hal::pso::DescriptorSetWrite {
                         set: &set,
@@ -313,17 +316,19 @@ where
         index: usize,
         _world: &specs::World,
     ) {
-        encoder.bind_graphics_descriptor_sets(
-            layout,
-            0,
-            Some(&self.sets[index]),
-            std::iter::empty(),
-        );
-        // This is a trick from Sascha Willems which uses just the gl_VertexIndex
-        // to calculate the position and uv coordinates for one full-scren "quad"
-        // which is actually just a triangle with two of the vertices positioned
-        // correctly off screen. This way we don't need a vertex buffer.
-        encoder.draw(0..3, 0..1);
+        unsafe {
+            encoder.bind_graphics_descriptor_sets(
+                layout,
+                0,
+                Some(&self.sets[index]),
+                std::iter::empty(),
+            );
+            // This is a trick from Sascha Willems which uses just the gl_VertexIndex
+            // to calculate the position and uv coordinates for one full-scren "quad"
+            // which is actually just a triangle with two of the vertices positioned
+            // correctly off screen. This way we don't need a vertex buffer.
+            encoder.draw(0..3, 0..1);
+        }
     }
 
     fn dispose(mut self, factory: &mut Factory<B>, _world: &specs::World) {

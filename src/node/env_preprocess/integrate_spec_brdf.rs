@@ -48,13 +48,10 @@ where
     type Pipeline = Pipeline;
 
     fn colors(&self) -> Vec<hal::pso::ColorBlendDesc> {
-        vec![
-            hal::pso::ColorBlendDesc(
-                hal::pso::ColorMask::RED | hal::pso::ColorMask::GREEN,
-                hal::pso::BlendState::Off,
-            );
-            1
-        ]
+        vec![hal::pso::ColorBlendDesc {
+            mask: hal::pso::ColorMask::RED | hal::pso::ColorMask::GREEN,
+            blend: None,
+        }]
     }
 
     fn depth_stencil(&self) -> Option<hal::pso::DepthStencilDesc> {
@@ -85,7 +82,7 @@ where
         _buffers: Vec<NodeBuffer>,
         _images: Vec<NodeImage>,
         _set_layouts: &[Handle<DescriptorSetLayout<B>>],
-    ) -> Result<Pipeline, failure::Error> {
+    ) -> Result<Pipeline, hal::pso::CreationError> {
         Ok(Pipeline)
     }
 }
@@ -114,7 +111,9 @@ where
         _index: usize,
         _aux: &Aux<B>,
     ) {
-        encoder.draw(0..3, 0..1);
+        unsafe {
+            encoder.draw(0..3, 0..1);
+        }
     }
 
     fn dispose(self, _factory: &mut Factory<B>, _aux: &Aux<B>) {}

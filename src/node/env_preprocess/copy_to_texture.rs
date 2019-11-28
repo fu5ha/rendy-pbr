@@ -1,13 +1,13 @@
 use rendy::{
     command::{
-        CommandBuffer, CommandPool, ExecutableState, Family, FamilyId, Fence, MultiShot,
+        CommandBuffer, CommandPool, ExecutableState, Families, Family, FamilyId, Fence, MultiShot,
         PendingState, Queue, SimultaneousUse, Submission, Submit, Supports, Transfer,
     },
     factory::{Factory, ImageState},
     frame::Frames,
     graph::{
         gfx_acquire_barriers, gfx_release_barriers, BufferAccess, BufferId, DynNode, GraphContext,
-        ImageAccess, ImageId, NodeBuffer, NodeBuilder, NodeId, NodeImage,
+        ImageAccess, ImageId, NodeBuffer, NodeBuildError, NodeBuilder, NodeId, NodeImage,
     },
     texture::Texture,
 };
@@ -16,10 +16,13 @@ use rendy::hal;
 
 #[derive(Debug)]
 pub struct CopyToTexture<B: hal::Backend> {
-    pool: CommandPool<B, hal::QueueType>,
+    pool: CommandPool<B>,
     submit: Submit<B, SimultaneousUse>,
-    buffer:
-        CommandBuffer<B, hal::QueueType, PendingState<ExecutableState<MultiShot<SimultaneousUse>>>>,
+    buffer: CommandBuffer<
+        B,
+        hal::queue::QueueType,
+        PendingState<ExecutableState<MultiShot<SimultaneousUse>>>,
+    >,
 }
 
 impl<B: hal::Backend> CopyToTexture<B> {
@@ -65,11 +68,8 @@ where
     B: hal::Backend,
     TR: CopyToTextureResource<B>,
 {
-    fn family(&self, _factory: &mut Factory<B>, families: &[Family<B>]) -> Option<FamilyId> {
-        families
-            .iter()
-            .find(|family| Supports::<Transfer>::supports(&family.capability()).is_some())
-            .map(|family| family.id())
+    fn family(&self, _factory: &mut Factory<B>, families: &Families<B>) -> Option<FamilyId> {
+        families.find(|family| Supports::<Transfer>::supports(&family.capability()).is_some())
     }
 
     fn buffers(&self) -> Vec<(BufferId, BufferAccess)> {
@@ -101,11 +101,11 @@ where
         aux: &TR,
         buffers: Vec<NodeBuffer>,
         images: Vec<NodeImage>,
-    ) -> Result<Box<dyn DynNode<B, TR>>, failure::Error> {
+    ) -> Result<Box<dyn DynNode<B, TR>>, NodeBuildError> {
         assert_eq!(buffers.len(), 0);
         assert_eq!(images.len(), 1);
 
-        let mut pool = factory.create_command_pool(family)?;
+        let mut pool = factory.create_command_pool(family).unwrap();
 
         let buf_initial = pool.allocate_buffers(1).pop().unwrap();
         let mut buf_recording = buf_initial.begin(MultiShot(SimultaneousUse), ());
@@ -116,36 +116,40 @@ where
             let (stages, barriers) = gfx_acquire_barriers(ctx, None, images.iter());
             log::trace!("Acquire {:?} : {:#?}", stages, barriers);
             if !barriers.is_empty() {
-                encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
+                unsafe {
+                    encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers)
+                };
             }
         }
 
         let image = ctx.get_image(images[0].id).unwrap();
-        encoder.copy_image(
-            image.raw(),
-            images[0].layout,
-            target_tex.image().raw(),
-            hal::image::Layout::TransferDstOptimal,
-            Some(hal::command::ImageCopy {
-                src_subresource: hal::image::SubresourceLayers {
-                    aspects: hal::format::Aspects::COLOR,
-                    level: 0,
-                    layers: 0..1,
-                },
-                src_offset: hal::image::Offset::ZERO,
-                dst_subresource: hal::image::SubresourceLayers {
-                    aspects: hal::format::Aspects::COLOR,
-                    level: 0,
-                    layers: 0..1,
-                },
-                dst_offset: hal::image::Offset::ZERO,
-                extent: hal::image::Extent {
-                    width: image.kind().extent().width,
-                    height: image.kind().extent().height,
-                    depth: 1,
-                },
-            }),
-        );
+        unsafe {
+            encoder.copy_image(
+                image.raw(),
+                images[0].layout,
+                target_tex.image().raw(),
+                hal::image::Layout::TransferDstOptimal,
+                Some(hal::command::ImageCopy {
+                    src_subresource: hal::image::SubresourceLayers {
+                        aspects: hal::format::Aspects::COLOR,
+                        level: 0,
+                        layers: 0..1,
+                    },
+                    src_offset: hal::image::Offset::ZERO,
+                    dst_subresource: hal::image::SubresourceLayers {
+                        aspects: hal::format::Aspects::COLOR,
+                        level: 0,
+                        layers: 0..1,
+                    },
+                    dst_offset: hal::image::Offset::ZERO,
+                    extent: hal::image::Extent {
+                        width: image.kind().extent().width,
+                        height: image.kind().extent().height,
+                        depth: 1,
+                    },
+                }),
+            );
+        }
 
         {
             let (mut stages, mut barriers) = gfx_release_barriers(ctx, None, images.iter());
@@ -167,7 +171,9 @@ where
             });
 
             log::trace!("Release {:?} : {:#?}", stages, barriers);
-            encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers);
+            unsafe {
+                encoder.pipeline_barrier(stages, hal::memory::Dependencies::empty(), barriers)
+            };
         }
 
         let (submit, buffer) = buf_recording.finish().submit();

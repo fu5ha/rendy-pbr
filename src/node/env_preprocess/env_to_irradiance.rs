@@ -2,7 +2,7 @@ use rendy::{
     command::{QueueId, RenderPassEncoder},
     factory::Factory,
     graph::{render::*, GraphContext, NodeBuffer, NodeImage},
-    hal::{pso::DescriptorPool, Device},
+    hal::{device::Device, pso::DescriptorPool},
     resource::{DescriptorSetLayout, Handle},
     shader::{PathBufShaderInfo, ShaderKind, SourceLanguage},
 };
@@ -54,7 +54,10 @@ where
     type Pipeline = Pipeline<B>;
 
     fn colors(&self) -> Vec<hal::pso::ColorBlendDesc> {
-        vec![hal::pso::ColorBlendDesc(hal::pso::ColorMask::ALL, hal::pso::BlendState::Off,); 1]
+        vec![hal::pso::ColorBlendDesc {
+            mask: hal::pso::ColorMask::ALL,
+            blend: None,
+        }]
     }
 
     fn depth_stencil(&self) -> Option<hal::pso::DepthStencilDesc> {
@@ -113,30 +116,32 @@ where
         buffers: Vec<NodeBuffer>,
         images: Vec<NodeImage>,
         set_layouts: &[Handle<DescriptorSetLayout<B>>],
-    ) -> Result<Pipeline<B>, failure::Error> {
+    ) -> Result<Pipeline<B>, hal::pso::CreationError> {
         assert!(buffers.is_empty());
         assert!(images.is_empty());
         assert!(set_layouts.len() == 1);
 
         let mut pool = unsafe {
-            factory.create_descriptor_pool(
-                1,
-                vec![
-                    hal::pso::DescriptorRangeDesc {
-                        ty: hal::pso::DescriptorType::Sampler,
-                        count: 1,
-                    },
-                    hal::pso::DescriptorRangeDesc {
-                        ty: hal::pso::DescriptorType::SampledImage,
-                        count: 1,
-                    },
-                ],
-                hal::pso::DescriptorPoolCreateFlags::empty(),
-            )?
+            factory
+                .create_descriptor_pool(
+                    1,
+                    vec![
+                        hal::pso::DescriptorRangeDesc {
+                            ty: hal::pso::DescriptorType::Sampler,
+                            count: 1,
+                        },
+                        hal::pso::DescriptorRangeDesc {
+                            ty: hal::pso::DescriptorType::SampledImage,
+                            count: 1,
+                        },
+                    ],
+                    hal::pso::DescriptorPoolCreateFlags::empty(),
+                )
+                .unwrap()
         };
 
         let set = unsafe {
-            let set = pool.allocate_set(&set_layouts[0].raw())?;
+            let set = pool.allocate_set(&set_layouts[0].raw()).unwrap();
             factory.write_descriptor_sets(vec![
                 hal::pso::DescriptorSetWrite {
                     set: &set,
@@ -187,8 +192,10 @@ where
         _index: usize,
         _aux: &Aux<B>,
     ) {
-        encoder.bind_graphics_descriptor_sets(layout, 0, Some(&self.set), std::iter::empty());
-        encoder.draw(0..6, 0..6);
+        unsafe {
+            encoder.bind_graphics_descriptor_sets(layout, 0, Some(&self.set), std::iter::empty());
+            encoder.draw(0..6, 0..6);
+        }
     }
 
     fn dispose(mut self, factory: &mut Factory<B>, _aux: &Aux<B>) {

@@ -1,6 +1,6 @@
 use crate::{asset, components, input, node};
 use nalgebra::Similarity3;
-use rendy::{hal, wsi::winit};
+use rendy::{hal, init::winit};
 use specs::{prelude::*, storage::UnprotectedStorage};
 
 use std::collections::HashSet;
@@ -15,7 +15,7 @@ impl<'a> System<'a> for InputSystem {
     fn run(&mut self, (events, mut input): Self::SystemData) {
         for event in events.0.iter() {
             match event {
-                winit::Event::WindowEvent { event, .. } => {
+                winit::event::Event::WindowEvent { event, .. } => {
                     input.update_with_window_event(&event);
                 }
                 _ => (),
@@ -42,14 +42,14 @@ impl<'a> System<'a> for PbrAuxInputSystem {
         (events, input, mesh_storage, mut aux, mut helmet_array_size): Self::SystemData,
     ) {
         use input::MouseState;
-        use winit::{ElementState, ModifiersState, VirtualKeyCode, WindowEvent};
+        use winit::event::{ElementState, Event, ModifiersState, VirtualKeyCode, WindowEvent};
 
         let mesh = &mesh_storage.0[self.helmet_mesh];
 
         let mut input = (*input).clone();
         for event in events.0.iter() {
             match event {
-                winit::Event::WindowEvent { event, .. } => {
+                Event::WindowEvent { event, .. } => {
                     input.update_with_window_event(&event);
                     match event {
                         WindowEvent::CursorMoved { .. } | WindowEvent::MouseInput { .. } => {
@@ -216,7 +216,7 @@ impl<'a> System<'a> for CameraInputSystem {
             MouseState, ROTATE_SENSITIVITY, TRANSLATE_SENSITIVITY, ZOOM_MOUSE_SENSITIVITY,
             ZOOM_SCROLL_SENSITIVITY,
         };
-        use winit::{DeviceEvent, ElementState, ModifiersState, MouseScrollDelta};
+        use winit::event::{DeviceEvent, ElementState, Event, ModifiersState, MouseScrollDelta};
         if let Some((_, transform, camera)) = (&active_cameras, &mut transforms, &mut cameras)
             .join()
             .next()
@@ -224,10 +224,10 @@ impl<'a> System<'a> for CameraInputSystem {
             let mut input = (*input).clone();
             for event in events.0.iter() {
                 match event {
-                    winit::Event::WindowEvent { event, .. } => {
+                    Event::WindowEvent { event, .. } => {
                         input.update_with_window_event(&event);
                     }
-                    winit::Event::DeviceEvent { event, .. } => match event {
+                    Event::DeviceEvent { event, .. } => match event {
                         DeviceEvent::MouseMotion { delta } => {
                             match (input.mouse, input.modifiers) {
                                 (
